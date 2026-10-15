@@ -1,0 +1,10 @@
+# Test code: same checks as the product, minus the ones the test-harness
+# macros trip by design (static self-registration of TEST_CASEs, and
+# CHECK(a && b) expanding to "if (!(a && b))").
+InheritParentConfig: true
+Checks: >
+  -bugprone-throwing-static-initialization,
+  -cert-err58-cpp,
+  -bugprone-macro-parentheses,
+  -readability-simplify-boolean-expr,
+  -misc-use-internal-linkage

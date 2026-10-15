@@ -1,0 +1,33 @@
+# Build output and restored packages
+bin/
+obj/
+packages/
+artifacts/
+tools/.nuget/
+
+# Build logs and crash dumps
+*.log
+*.binlog
+*.dmp
+
+# Visual Studio and Visual Studio Code
+.vs/
+.vscode/
+*.user
+*.aps
+*.VC.db
+*.VC.opendb
+ipch/
+
+# Python caches (tools/*.py)
+__pycache__/
+
+# AI coding assistants' local files (Claude Code)
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+
+# File Explorer
+Thumbs.db
+desktop.ini

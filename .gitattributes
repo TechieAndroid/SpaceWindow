@@ -1,0 +1,6 @@
+# Store text files with LF line endings; Git converts them on checkout.
+* text=auto
+
+# Binary files.
+*.png binary
+*.ico binary

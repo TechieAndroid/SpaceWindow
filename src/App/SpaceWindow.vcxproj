@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SpaceWindow: WinUI 3 desktop app (C++/WinRT, Windows App SDK).
+
+  Unpackaged and self-contained: the build output folder holds the app and the
+  Windows App SDK runtime it needs, and runs on Windows 10 1809 or later
+  without an installer, the Windows App Runtime, or the VC++ redistributable -
+  as close as a WinUI app gets to SpaceMonger 1.x's "copy the .exe anywhere".
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- NuGet packages (keep in sync with packages.config).  Together these are the
+       Windows App SDK 2.5.1 components a WinUI 3 app needs. -->
+  <PropertyGroup Label="Packages">
+    <PackagesDir>$(MSBuildThisFileDirectory)..\..\packages\</PackagesDir>
+    <PkgCppWinRT>$(PackagesDir)Microsoft.Windows.CppWinRT.3.0.260818.1\</PkgCppWinRT>
+    <PkgWil>$(PackagesDir)Microsoft.Windows.ImplementationLibrary.1.0.260126.7\</PkgWil>
+    <PkgSdkBuildToolsMsix>$(PackagesDir)Microsoft.Windows.SDK.BuildTools.MSIX.1.7.251221100\</PkgSdkBuildToolsMsix>
+    <PkgSdkBuildTools>$(PackagesDir)Microsoft.Windows.SDK.BuildTools.10.0.28000.2705\</PkgSdkBuildTools>
+    <PkgWebView2>$(PackagesDir)Microsoft.Web.WebView2.1.0.3719.77\</PkgWebView2>
+    <PkgWinAppSdkBase>$(PackagesDir)Microsoft.WindowsAppSDK.Base.2.0.4\</PkgWinAppSdkBase>
+    <PkgInteractiveExperiences>$(PackagesDir)Microsoft.WindowsAppSDK.InteractiveExperiences.2.1.9\</PkgInteractiveExperiences>
+    <PkgFoundation>$(PackagesDir)Microsoft.WindowsAppSDK.Foundation.2.3.12\</PkgFoundation>
+    <PkgWinUI>$(PackagesDir)Microsoft.WindowsAppSDK.WinUI.2.3.9\</PkgWinUI>
+    <WindowsAppSdkMajor>2</WindowsAppSdkMajor>
+    <WindowsAppSdkMinor>5</WindowsAppSdkMinor>
+    <WindowsAppSdkPatch>1</WindowsAppSdkPatch>
+  </PropertyGroup>
+  <PropertyGroup>
+    <!-- Keep the XAML compiler's and C++/WinRT's generated sources out of the
+         source tree, one copy per configuration and platform (they differ).
+         Not inside IntDir: MSBuild's IncrementalClean deletes files there that
+         an earlier build reported writing and the current one did not, and the
+         XAML compiler does not report XamlMetaDataProvider.h every time, so a
+         rebuild deleted that header until the next build, which broke tools
+         that read the generated sources (IntelliSense, clang-tidy). -->
+    <GeneratedFilesDir>$(MSBuildThisFileDirectory)..\..\obj\$(Platform)\$(Configuration)\Generated Files\SpaceWindow\</GeneratedFilesDir>
+  </PropertyGroup>
+  <Import Project="$(PkgCppWinRT)build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('$(PkgCppWinRT)build\native\Microsoft.Windows.CppWinRT.props')" />
+  <Import Project="$(PkgSdkBuildTools)build\Microsoft.Windows.SDK.BuildTools.props" Condition="Exists('$(PkgSdkBuildTools)build\Microsoft.Windows.SDK.BuildTools.props')" />
+  <Import Project="$(PkgSdkBuildToolsMsix)build\Microsoft.Windows.SDK.BuildTools.MSIX.props" Condition="Exists('$(PkgSdkBuildToolsMsix)build\Microsoft.Windows.SDK.BuildTools.MSIX.props')" />
+  <Import Project="$(PkgWinAppSdkBase)build\native\Microsoft.WindowsAppSDK.Base.props" Condition="Exists('$(PkgWinAppSdkBase)build\native\Microsoft.WindowsAppSDK.Base.props')" />
+  <Import Project="$(PkgInteractiveExperiences)build\native\Microsoft.WindowsAppSDK.InteractiveExperiences.props" Condition="Exists('$(PkgInteractiveExperiences)build\native\Microsoft.WindowsAppSDK.InteractiveExperiences.props')" />
+  <Import Project="$(PkgFoundation)build\native\Microsoft.WindowsAppSDK.Foundation.props" Condition="Exists('$(PkgFoundation)build\native\Microsoft.WindowsAppSDK.Foundation.props')" />
+  <Import Project="$(PkgWinUI)build\native\Microsoft.WindowsAppSDK.WinUI.props" Condition="Exists('$(PkgWinUI)build\native\Microsoft.WindowsAppSDK.WinUI.props')" />
+  <PropertyGroup Label="Globals">
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+    <MinimalCoreWin>true</MinimalCoreWin>
+    <ProjectGuid>{3F2A9C41-8E6B-4D17-A5C3-9B0E7D1F6A28}</ProjectGuid>
+    <ProjectName>SpaceWindow</ProjectName>
+    <RootNamespace>SpaceWindow</RootNamespace>
+    <TargetName>$(RootNamespace)</TargetName>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <AppContainerApplication>false</AppContainerApplication>
+    <ApplicationType>Windows Store</ApplicationType>
+    <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
+    <!-- "10.0" (latest) is not resolved for this application type, so resolve it here. -->
+    <WindowsTargetPlatformVersion>$([Microsoft.Build.Utilities.ToolLocationHelper]::GetLatestSDKTargetPlatformVersion('Windows', '10.0'))</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformMinVersion>10.0.17763.0</WindowsTargetPlatformMinVersion>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- Unpackaged, self-contained deployment. -->
+    <AppxPackage>false</AppxPackage>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSDKFrameworkPackageReference>false</WindowsAppSDKFrameworkPackageReference>
+    <!-- WinUI's metadata refers to WebView2 types, so C++/WinRT needs its .winmd. -->
+    <WebView2UseWinRT>true</WebView2UseWinRT>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <DesktopCompatible>true</DesktopCompatible>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="..\..\build\SpaceWindow.Cpp.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
+      <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
+      <PreprocessorDefinitions>SPACEWINDOW_WASDK_MAJOR=$(WindowsAppSdkMajor);SPACEWINDOW_WASDK_MINOR=$(WindowsAppSdkMinor);SPACEWINDOW_WASDK_PATCH=$(WindowsAppSdkPatch);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>d2d1.lib;d3d11.lib;dxgi.lib;dwrite.lib;gdi32.lib;shell32.lib;ole32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <Manifest Include="app.manifest" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="App.xaml.h">
+      <DependentUpon>App.xaml</DependentUpon>
+    </ClInclude>
+    <ClInclude Include="MainWindow.xaml.h">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </ClInclude>
+    <ClInclude Include="ShellOps.h" />
+    <ClInclude Include="ChromeTheme.h" />
+    <ClInclude Include="ChromeThemeKeys.h" />
+    <ClInclude Include="MapRenderer.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml" />
+    <Page Include="MainWindow.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="App.xaml.cpp">
+      <DependentUpon>App.xaml</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="MainWindow.xaml.cpp">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="ShellOps.cpp" />
+    <ClCompile Include="ChromeTheme.cpp" />
+    <ClCompile Include="MapRenderer.cpp" />
+    <ClCompile Include="MapRendererPie.cpp" />
+    <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="MainWindow.idl">
+      <SubType>Code</SubType>
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Midl>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="SpaceWindow.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="Assets\SpaceWindow.ico" />
+    <Image Include="Assets\SpaceWindow.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Core\Core.vcxproj">
+      <Project>{6B1E7C9A-2F4D-4E8B-9A3C-5D7E1F2A4B60}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(PkgWil)build\native\Microsoft.Windows.ImplementationLibrary.targets" Condition="Exists('$(PkgWil)build\native\Microsoft.Windows.ImplementationLibrary.targets')" />
+    <Import Project="$(PkgWebView2)build\native\Microsoft.Web.WebView2.targets" Condition="Exists('$(PkgWebView2)build\native\Microsoft.Web.WebView2.targets')" />
+    <Import Project="$(PkgSdkBuildTools)build\Microsoft.Windows.SDK.BuildTools.targets" Condition="Exists('$(PkgSdkBuildTools)build\Microsoft.Windows.SDK.BuildTools.targets')" />
+    <Import Project="$(PkgSdkBuildToolsMsix)build\Microsoft.Windows.SDK.BuildTools.MSIX.targets" Condition="Exists('$(PkgSdkBuildToolsMsix)build\Microsoft.Windows.SDK.BuildTools.MSIX.targets')" />
+    <Import Project="$(PkgWinAppSdkBase)build\native\Microsoft.WindowsAppSDK.Base.targets" Condition="Exists('$(PkgWinAppSdkBase)build\native\Microsoft.WindowsAppSDK.Base.targets')" />
+    <Import Project="$(PkgInteractiveExperiences)build\native\Microsoft.WindowsAppSDK.InteractiveExperiences.targets" Condition="Exists('$(PkgInteractiveExperiences)build\native\Microsoft.WindowsAppSDK.InteractiveExperiences.targets')" />
+    <Import Project="$(PkgFoundation)build\native\Microsoft.WindowsAppSDK.Foundation.targets" Condition="Exists('$(PkgFoundation)build\native\Microsoft.WindowsAppSDK.Foundation.targets')" />
+    <Import Project="$(PkgWinUI)build\native\Microsoft.WindowsAppSDK.WinUI.targets" Condition="Exists('$(PkgWinUI)build\native\Microsoft.WindowsAppSDK.WinUI.targets')" />
+    <Import Project="$(PkgCppWinRT)build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('$(PkgCppWinRT)build\native\Microsoft.Windows.CppWinRT.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(PkgCppWinRT)build\native\Microsoft.Windows.CppWinRT.targets') Or !Exists('$(PkgWinUI)build\native\Microsoft.WindowsAppSDK.WinUI.targets')" Text="NuGet packages are missing.  Run build.ps1 (or nuget restore) first." />
+  </Target>
+</Project>

@@ -1,0 +1,41 @@
+# clang-tidy configuration for SpaceWindow (run with tools/Run-ClangTidy.ps1).
+#
+# Enabled: checks that find real bugs (bugprone, CERT, concurrency), wasted
+# work (performance) and pre-C++20 idioms (modernize).  Disabled: style rules
+# that fight the Win32 API (C arrays for fixed buffers, BOOL conversions) and
+# purely cosmetic preferences.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  cert-*,
+  -cert-err58-cpp,
+  concurrency-*,
+  -concurrency-mt-unsafe,
+  performance-*,
+  -performance-enum-size,
+  modernize-*,
+  -modernize-avoid-c-arrays,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-use-designated-initializers,
+  -modernize-use-std-print,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-misplaced-const,
+  -misc-non-private-member-variables-in-classes,
+  -misc-use-anonymous-namespace,
+  -misc-no-recursion,
+  readability-container-size-empty,
+  readability-redundant-*,
+  readability-simplify-boolean-expr,
+  readability-make-member-function-const,
+  readability-static-accessed-through-instance
+HeaderFilterRegex: '.*[\\/](src[\\/](App|Core)|tests[\\/]CoreTests)[\\/].*'
+FormatStyle: none
+CheckOptions:
+  # C++/WinRT projections are reference-counted handles whose methods are all
+  # const, so "const" would only freeze the handle and misleadingly suggest the
+  # object is not being configured.
+  misc-const-correctness.AllowedTypes: 'winrt::.*;Windows::.*;Microsoft::.*;muxc::.*;muxm::.*;mux::.*'

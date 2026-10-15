@@ -1,0 +1,576 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SpaceWindow's main window.  Replaces CMainFrame, CMainToolBar, CFolderView's
+  window plumbing and the dialog templates of SpaceMonger.rc (1.4.0).
+  All captions are set from the language tables in code, because SpaceWindow
+  switches language at run time.
+-->
+<Window
+    x:Class="SpaceWindow.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="SpaceWindow">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid
+        x:Name="RootGrid"
+        AllowDrop="True"
+        Background="Transparent"
+        DragOver="OnDragOver"
+        Drop="OnDrop"
+        KeyboardAcceleratorPlacementMode="Hidden">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!--
+          Keyboard shortcuts belong to the window, not to the toolbar buttons:
+          when the window is narrow the toolbar moves buttons into its overflow
+          menu, and a button's own shortcut stops working while it is there.
+          The buttons only show the shortcut (KeyboardAcceleratorTextOverride),
+          and the window itself shows none (no "Ctrl+O" tooltip over the map).
+        -->
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="O" Modifiers="Control" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="F5" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="F5" Modifiers="Shift" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="Home" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="Back" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="Up" Modifiers="Menu" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="Down" Modifiers="Menu" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="Right" Modifiers="Menu" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="P" Modifiers="Control" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="Delete" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="F1" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="Enter" Modifiers="Menu" Invoked="OnShortcut" />
+            <KeyboardAccelerator Key="C" Modifiers="Control,Shift" Invoked="OnShortcut" />
+        </Grid.KeyboardAccelerators>
+
+        <TitleBar x:Name="AppTitleBar" Title="SpaceWindow">
+            <TitleBar.IconSource>
+                <ImageIconSource ImageSource="ms-appx:///Assets/SpaceWindow.png" />
+            </TitleBar.IconSource>
+        </TitleBar>
+
+        <!-- The toolbar of 1.4.0: Open, Reload | Zoom Full, Zoom In, Zoom Out | Free Space (+ Pie Chart) | Run, Delete | Setup | About. -->
+        <CommandBar
+            x:Name="Toolbar"
+            Grid.Row="1"
+            Margin="4,0,4,0"
+            HorizontalAlignment="Left"
+            Background="Transparent"
+            DefaultLabelPosition="Right">
+            <AppBarButton x:Name="OpenButton" Click="OnOpen" KeyboardAcceleratorTextOverride="Ctrl+O">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE838;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+            <AppBarButton x:Name="RescanButton" Click="OnRescan" KeyboardAcceleratorTextOverride="F5">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE72C;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+            <AppBarSeparator />
+            <AppBarButton x:Name="ZoomFullButton" Click="OnZoomFull" KeyboardAcceleratorTextOverride="Home">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE9A6;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+            <AppBarButton x:Name="ZoomInButton" Click="OnZoomIn" KeyboardAcceleratorTextOverride="Enter">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE8A3;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+            <AppBarButton x:Name="ZoomOutButton" Click="OnZoomOut" KeyboardAcceleratorTextOverride="Backspace">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE71F;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+            <AppBarSeparator />
+            <AppBarToggleButton x:Name="FreeSpaceButton" Click="OnToggleFreeSpace" IsChecked="True">
+                <AppBarToggleButton.Icon>
+                    <FontIcon Glyph="&#xEDA2;" />
+                </AppBarToggleButton.Icon>
+            </AppBarToggleButton>
+            <!-- New in SpaceWindow: draw the map as a pie chart instead of a treemap. -->
+            <AppBarToggleButton x:Name="PieChartButton" Click="OnTogglePieChart" KeyboardAcceleratorTextOverride="Ctrl+P">
+                <AppBarToggleButton.Icon>
+                    <FontIcon Glyph="&#xEB05;" />
+                </AppBarToggleButton.Icon>
+            </AppBarToggleButton>
+            <AppBarSeparator />
+            <AppBarButton x:Name="RunButton" Click="OnRun">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE768;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+            <AppBarButton x:Name="DeleteButton" Click="OnDelete" KeyboardAcceleratorTextOverride="Del">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE74D;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+            <AppBarSeparator />
+            <AppBarButton x:Name="SettingsButton" Click="OnSettings">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE713;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+            <AppBarButton x:Name="AboutButton" Click="OnAbout" KeyboardAcceleratorTextOverride="F1">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE897;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+
+            <CommandBar.SecondaryCommands>
+                <AppBarButton x:Name="PropertiesButton" Click="OnProperties" KeyboardAcceleratorTextOverride="Alt+Enter">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE946;" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
+                <AppBarButton x:Name="ExplorerButton" Click="OnShowInExplorer">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xEC50;" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
+                <AppBarButton x:Name="CopyPathButton" Click="OnCopyPath" KeyboardAcceleratorTextOverride="Ctrl+Shift+C">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE8C8;" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
+            </CommandBar.SecondaryCommands>
+        </CommandBar>
+
+        <Grid x:Name="MapArea" Grid.Row="2" Margin="8,4,8,0">
+            <!-- The map.  A UserControl wraps the panel so it can take keyboard focus. -->
+            <UserControl
+                x:Name="MapFocus"
+                AutomationProperties.Name="Disk usage map"
+                IsTabStop="True"
+                KeyDown="OnMapKeyDown"
+                UseSystemFocusVisuals="True">
+                <SwapChainPanel
+                    x:Name="MapPanel"
+                    CompositionScaleChanged="OnMapScaleChanged"
+                    DoubleTapped="OnMapDoubleTapped"
+                    PointerExited="OnMapPointerExited"
+                    PointerMoved="OnMapPointerMoved"
+                    PointerPressed="OnMapPointerPressed"
+                    RightTapped="OnMapRightTapped"
+                    SizeChanged="OnMapSizeChanged" />
+            </UserControl>
+
+            <!-- Shown until a drive or folder has been scanned. -->
+            <StackPanel
+                x:Name="EmptyState"
+                MaxWidth="460"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="12">
+                <Image
+                    Width="96"
+                    Height="96"
+                    HorizontalAlignment="Center"
+                    AutomationProperties.AccessibilityView="Raw"
+                    Source="ms-appx:///Assets/SpaceWindow.png" />
+                <TextBlock
+                    x:Name="EmptyTitle"
+                    HorizontalAlignment="Center"
+                    AutomationProperties.HeadingLevel="Level1"
+                    Style="{StaticResource SubtitleTextBlockStyle}"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    x:Name="EmptyText"
+                    HorizontalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+                <Button
+                    x:Name="EmptyOpenButton"
+                    HorizontalAlignment="Center"
+                    Click="OnOpen"
+                    Style="{StaticResource AccentButtonStyle}" />
+            </StackPanel>
+
+            <!-- File-name tips and file-info tips (1.4.0's CTipWnd). -->
+            <Canvas x:Name="TipLayer" IsHitTestVisible="False">
+                <Border
+                    x:Name="NameTip"
+                    Padding="3,0,3,1"
+                    BorderBrush="Black"
+                    BorderThickness="1"
+                    Visibility="Collapsed">
+                    <TextBlock x:Name="NameTipText" />
+                </Border>
+                <Border
+                    x:Name="InfoTip"
+                    MaxWidth="560"
+                    Padding="10,8"
+                    Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{ThemeResource OverlayCornerRadius}"
+                    Visibility="Collapsed">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Image
+                            x:Name="InfoTipIcon"
+                            Width="32"
+                            Height="32"
+                            VerticalAlignment="Top" />
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock x:Name="InfoTipName" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock
+                                x:Name="InfoTipPath"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                x:Name="InfoTipDetails"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Canvas>
+
+            <!-- Scan progress (1.4.0's "Scanning Disk..." dialog). -->
+            <Grid
+                x:Name="ScanOverlay"
+                Background="Transparent"
+                Visibility="Collapsed">
+                <!-- Dims the map; over a live map of the scan it goes, and the card moves to the bottom. -->
+                <Rectangle x:Name="ScanSmoke" Fill="{ThemeResource SmokeFillColorDefaultBrush}" />
+                <Border
+                    x:Name="ScanCard"
+                    Width="540"
+                    Padding="24"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{ThemeResource OverlayCornerRadius}">
+                    <StackPanel Spacing="12">
+                        <TextBlock
+                            x:Name="ScanTitle"
+                            AutomationProperties.HeadingLevel="Level2"
+                            Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock
+                            x:Name="ScanPath"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            TextTrimming="CharacterEllipsis" />
+                        <ProgressBar x:Name="ScanProgressBar" Maximum="1000" />
+                        <Grid ColumnSpacing="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ScanFiles" VerticalAlignment="Center" />
+                            <TextBlock
+                                x:Name="ScanFolders"
+                                Grid.Column="1"
+                                VerticalAlignment="Center" />
+                            <Button
+                                x:Name="ScanCancelButton"
+                                Grid.Column="2"
+                                HorizontalAlignment="Right"
+                                Click="OnCancelScan" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <StackPanel
+                Margin="0,8,0,0"
+                VerticalAlignment="Top"
+                Spacing="8">
+                <InfoBar
+                    x:Name="ErrorBar"
+                    IsClosable="True"
+                    IsOpen="False"
+                    Severity="Error" />
+                <!-- Theme files that could not be used (a scan does not hide this one). -->
+                <InfoBar
+                    x:Name="ThemeBar"
+                    IsClosable="True"
+                    IsOpen="False"
+                    Severity="Warning" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Status bar: what is selected or shown, and how big it is. -->
+        <Grid
+            x:Name="StatusBar"
+            Grid.Row="3"
+            Padding="12,6,12,8"
+            ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                x:Name="StatusPath"
+                IsTextSelectionEnabled="True"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                TextTrimming="CharacterEllipsis" />
+            <TextBlock
+                x:Name="StatusInfo"
+                Grid.Column="1"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}" />
+            <!-- How many folders could not be read; lists them. -->
+            <HyperlinkButton
+                x:Name="UnreadableButton"
+                Grid.Column="2"
+                MinHeight="0"
+                Padding="0"
+                VerticalAlignment="Center"
+                Click="OnShowUnreadable"
+                Visibility="Collapsed">
+                <TextBlock x:Name="UnreadableText" Style="{StaticResource CaptionTextBlockStyle}" />
+            </HyperlinkButton>
+        </Grid>
+
+        <!--
+            Dialog bodies.  The ContentDialogs are created in code (with XamlRoot and
+            DefaultContentDialogStyle, as the WinUI Gallery does), and these bodies are
+            moved into them the first time they are shown.
+        -->
+        <Grid x:Name="DialogContents" Visibility="Collapsed">
+            <!-- 1.4.0's "Select Drive to View", plus any folder. -->
+            <StackPanel x:Name="DriveContent" MinWidth="420" Spacing="8">
+                <ListView
+                    x:Name="DriveList"
+                    MaxHeight="380"
+                    DoubleTapped="OnDriveDoubleTapped"
+                    SelectionChanged="OnDriveSelectionChanged"
+                    SelectionMode="Single" />
+                <HyperlinkButton x:Name="BrowseButton" Click="OnBrowseFolder" />
+            </StackPanel>
+
+            <!-- 1.4.0's "SpaceMonger Settings". -->
+            <ScrollViewer
+                x:Name="SettingsContent"
+                MaxHeight="560"
+                Padding="0,0,16,0"
+                VerticalScrollBarVisibility="Auto">
+                <StackPanel MinWidth="460" Spacing="8">
+                    <TextBlock
+                        x:Name="AppearanceHeader"
+                        AutomationProperties.HeadingLevel="Level2"
+                        Style="{StaticResource SectionHeaderStyle}" />
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <ComboBox
+                            x:Name="LanguageBox"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="OnLanguagePreview" />
+                        <!-- Picking a theme shows it at once; Cancel goes back. -->
+                        <ComboBox
+                            x:Name="ThemeBox"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="OnThemePreview" />
+                        <HyperlinkButton
+                            x:Name="ThemesFolderButton"
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Click="OnOpenThemesFolder" />
+                        <InfoBar
+                            x:Name="ThemeErrorBar"
+                            Grid.Row="2"
+                            Grid.ColumnSpan="2"
+                            IsClosable="False"
+                            IsOpen="False"
+                            Severity="Warning" />
+                    </Grid>
+
+                    <TextBlock
+                        x:Name="LayoutHeader"
+                        AutomationProperties.HeadingLevel="Level2"
+                        Style="{StaticResource SectionHeaderStyle}" />
+                    <ComboBox x:Name="DensityBox" HorizontalAlignment="Stretch" />
+                    <Slider
+                        x:Name="BiasSlider"
+                        Maximum="20"
+                        Minimum="-20"
+                        StepFrequency="1"
+                        TickFrequency="5"
+                        TickPlacement="Outside" />
+                    <Grid Margin="0,-4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="BiasHorz" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock
+                            x:Name="BiasEqual"
+                            Grid.Column="1"
+                            HorizontalAlignment="Center"
+                            Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock
+                            x:Name="BiasVert"
+                            Grid.Column="2"
+                            HorizontalAlignment="Right"
+                            Style="{StaticResource CaptionTextBlockStyle}" />
+                    </Grid>
+
+                    <TextBlock
+                        x:Name="ColorsHeader"
+                        AutomationProperties.HeadingLevel="Level2"
+                        Style="{StaticResource SectionHeaderStyle}" />
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="FileColorBox" HorizontalAlignment="Stretch" />
+                        <ComboBox
+                            x:Name="FolderColorBox"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch" />
+                    </Grid>
+
+                    <TextBlock
+                        x:Name="TipsHeader"
+                        AutomationProperties.HeadingLevel="Level2"
+                        Style="{StaticResource SectionHeaderStyle}" />
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="140" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox
+                            x:Name="NameTipsBox"
+                            VerticalAlignment="Bottom"
+                            Click="OnTipOptionChanged" />
+                        <NumberBox
+                            x:Name="NameTipDelayBox"
+                            Grid.Column="1"
+                            Maximum="99999"
+                            Minimum="0"
+                            SpinButtonPlacementMode="Compact" />
+                    </Grid>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="140" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox
+                            x:Name="InfoTipsBox"
+                            VerticalAlignment="Bottom"
+                            Click="OnTipOptionChanged" />
+                        <NumberBox
+                            x:Name="InfoTipDelayBox"
+                            Grid.Column="1"
+                            Maximum="99999"
+                            Minimum="0"
+                            SpinButtonPlacementMode="Compact" />
+                    </Grid>
+                    <Grid Margin="28,0,0,0" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <CheckBox x:Name="TipPathBox" />
+                        <CheckBox x:Name="TipDateBox" Grid.Column="1" />
+                        <CheckBox x:Name="TipNameBox" Grid.Row="1" />
+                        <CheckBox
+                            x:Name="TipSizeBox"
+                            Grid.Row="1"
+                            Grid.Column="1" />
+                        <CheckBox x:Name="TipIconBox" Grid.Row="2" />
+                        <CheckBox
+                            x:Name="TipAttribBox"
+                            Grid.Row="2"
+                            Grid.Column="1" />
+                    </Grid>
+                    <CheckBox x:Name="RolloverBox" />
+
+                    <TextBlock
+                        x:Name="MiscHeader"
+                        AutomationProperties.HeadingLevel="Level2"
+                        Style="{StaticResource SectionHeaderStyle}" />
+                    <CheckBox x:Name="AutoRescanBox" />
+                    <CheckBox x:Name="DisableDeleteBox" />
+                    <CheckBox x:Name="AnimatedZoomBox" />
+                    <CheckBox x:Name="SavePositionBox" />
+
+                    <!-- New in SpaceWindow: the keyboard shortcuts, a row each (filled in from the language table). -->
+                    <TextBlock
+                        x:Name="ShortcutsHeader"
+                        AutomationProperties.HeadingLevel="Level2"
+                        Style="{StaticResource SectionHeaderStyle}" />
+                    <Grid
+                        x:Name="ShortcutsList"
+                        Margin="0,0,0,8"
+                        ColumnSpacing="16"
+                        RowSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 1.4.0's About box. -->
+            <StackPanel x:Name="AboutContent" MaxWidth="460" Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <Image
+                        Width="64"
+                        Height="64"
+                        AutomationProperties.AccessibilityView="Raw"
+                        Source="ms-appx:///Assets/SpaceWindow.png" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="SpaceWindow" />
+                        <TextBlock x:Name="AboutVersion" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Copyright © 2026 recompiler" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="SpaceMonger © 1998–2020 Sean Werkema" />
+                    </StackPanel>
+                </StackPanel>
+                <TextBlock
+                    x:Name="AboutFreeware"
+                    FontWeight="SemiBold"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    x:Name="AboutWarranty"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+                <TextBlock x:Name="AboutCredits" TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

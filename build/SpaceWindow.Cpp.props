@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared C++ settings for every SpaceWindow project.  Import it from the
+  "PropertySheets" ImportGroup, after Microsoft.Cpp.props.
+
+  * C++20, standards conformance, UTF-8 sources.
+  * /W4 with warnings as errors; third-party (<angle-bracket>) headers are
+    treated as external and do not produce warnings.
+  * Hardening: /sdl, /GS, Control Flow Guard, CET shadow stacks, ASLR, DEP.
+  * Release: /O2 with whole-program optimization and link-time code generation.
+  * Hybrid CRT: the C++ runtime is linked statically and the Universal CRT
+    (part of Windows 10/11) dynamically.  The Windows App SDK runtime is built
+    the same way, so the app needs no Visual C++ redistributable.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <SpaceWindowRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..'))</SpaceWindowRoot>
+    <OutDir>$(SpaceWindowRoot)bin\$(Platform)\$(Configuration)\$(MSBuildProjectName)\</OutDir>
+    <IntDir>$(SpaceWindowRoot)obj\$(Platform)\$(Configuration)\$(MSBuildProjectName)\</IntDir>
+    <SpaceWindowSanitize Condition="'$(Configuration)' == 'Asan'">true</SpaceWindowSanitize>
+    <SpaceWindowRelease Condition="'$(Configuration)' == 'Release'">true</SpaceWindowRelease>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <DisableAnalyzeExternal>true</DisableAnalyzeExternal>
+      <SDLCheck>true</SDLCheck>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <ControlFlowGuard Condition="'$(SpaceWindowSanitize)' != 'true'">Guard</ControlFlowGuard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <PreprocessorDefinitions>NOMINMAX;WIN32_LEAN_AND_MEAN;STRICT;_WIN32_WINNT=0x0A00;WINVER=0x0A00;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus /Zc:preprocessor /Zc:inline /Zc:throwingNew /diagnostics:caret %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <RandomizedBaseAddress>true</RandomizedBaseAddress>
+      <DataExecutionPrevention>true</DataExecutionPrevention>
+      <AdditionalOptions Condition="'$(SpaceWindowSanitize)' != 'true'">/guard:cf %(AdditionalOptions)</AdditionalOptions>
+      <CETCompat Condition="'$(Platform)' == 'x64'">true</CETCompat>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- Release: optimize for speed across the whole program. -->
+  <ItemDefinitionGroup Condition="'$(SpaceWindowRelease)' == 'true'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <StringPooling>true</StringPooling>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/Gw %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Lib>
+      <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
+    </Lib>
+    <Link>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <IgnoreSpecificDefaultLibraries>libucrt.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <AdditionalDependencies>ucrt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- Debug: no optimization, run-time checks. -->
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <IgnoreSpecificDefaultLibraries>libucrtd.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <AdditionalDependencies>ucrtd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- Asan: AddressSanitizer build of the core library and its tests. -->
+  <ItemDefinitionGroup Condition="'$(SpaceWindowSanitize)' == 'true'">
+    <ClCompile>
+      <!-- Release CRT without _DEBUG: defining _DEBUG with /MD mismatches the STL's iterator-debug level. -->
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

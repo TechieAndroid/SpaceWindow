@@ -1,0 +1,42 @@
+// SpaceWindow resources: the application icon and version information.
+#include <winres.h>
+#include "resource.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(65001)
+
+// The icon with the lowest ID is the one Explorer shows for the .exe.
+IDI_SPACEWINDOW ICON "Assets\\SpaceWindow.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "recompiler"
+            VALUE "FileDescription", "SpaceWindow - see where your disk space goes"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "SpaceWindow"
+            VALUE "LegalCopyright", "Copyright © 2026 recompiler; SpaceMonger © 1998-2020 Sean Werkema. MIT License."
+            VALUE "OriginalFilename", "SpaceWindow.exe"
+            VALUE "ProductName", "SpaceWindow"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
