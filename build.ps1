@@ -34,7 +34,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = $PSScriptRoot
-$version = '1.0.0'  # keep in step with src\App\SpaceWindow.rc, app.manifest and kVersion in MainWindow.xaml.cpp
+$version = '1.0.0'  # keep in step with src\App\SpaceWindow.rc, app.manifest and kVersion in MainWindowShared.h
 if ($All) { $Analyze = $true; $Sanitize = $true }
 
 function Step([string] $message) { Write-Host "`n==> $message" -ForegroundColor Cyan }

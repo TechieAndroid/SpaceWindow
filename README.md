@@ -22,7 +22,7 @@ same map can also be drawn as a pie chart, and the whole app can wear a theme
 such as Dracula. Point at anything to see what it is, double-click a folder to
 zoom in, and clean up straight from the map.
 
-![SpaceWindow showing the Visual Studio Build Tools folder](docs/screenshots/treemap.png)
+![SpaceWindow's welcome screen, with the Y2K Tunnel animation playing behind it](docs/screenshots/welcome.png)
 
 ## Contents
 
@@ -109,6 +109,8 @@ the drive holds: under the name nearest the top of the drive (so
 info tip of its other names says so.
 
 ### The map
+
+![SpaceWindow showing the Visual Studio Build Tools folder](docs/screenshots/treemap.png)
 
 | Mouse | |
 |---|---|
