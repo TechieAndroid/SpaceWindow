@@ -11,6 +11,8 @@
     5. Runs the unit tests (when the target platform matches this machine),
        and optionally runs them again under AddressSanitizer.
     6. Publishes a ready-to-run folder (and .zip) under artifacts\.
+    7. Builds an installer from it, and the winget manifest of the release,
+       when Inno Setup 6 is installed (winget install JRSoftware.InnoSetup).
 
     Works in Windows PowerShell 5.1 and PowerShell 7.
 
@@ -43,6 +45,34 @@ function Invoke-MSBuild([string] $project, [string] $configuration, [string] $pl
     & $script:msbuild $project "/p:Configuration=$configuration" "/p:Platform=$platform" /m /nologo /v:minimal `
         "/clp:ErrorsOnly;WarningsOnly;Summary" @extra
     if ($LASTEXITCODE -ne 0) { throw "Build failed: $project ($configuration|$platform)" }
+}
+
+# Inno Setup's compiler, from where its installer says it put it (all users or just one).
+function Find-InnoSetup {
+    foreach ($uninstall in 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall') {
+        $entry = Get-ItemProperty (Join-Path $uninstall 'Inno Setup 6_is1') -ErrorAction SilentlyContinue
+        if ($entry -and $entry.PSObject.Properties['InstallLocation']) {
+            $iscc = Join-Path $entry.InstallLocation 'ISCC.exe'
+            if (Test-Path $iscc) { return $iscc }
+        }
+    }
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    return $null
+}
+
+# The repository's web address, https://github.com/<owner>/<repository>, from
+# git's "origin" remote: for the installer's links and the winget manifest.
+function Get-RepositoryUrl {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
+    $ErrorActionPreference = 'Continue'  # git's complaints are not errors here
+    $url = git -C $root remote get-url origin 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $url) { return $null }
+    $url = "$url".Trim() -replace '^git@github\.com:', 'https://github.com/' -replace '\.git$', ''
+    if ($url -notmatch '^https://github\.com/[^/]+/[^/]+$') { return $null }
+    return $url
 }
 
 # ---------------------------------------------------------------- toolchain
@@ -150,6 +180,32 @@ if (-not $NoPublish) {
     $size = [math]::Round((Get-ChildItem $target -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
     Write-Host "    $target ($size MB)"
     Write-Host "    $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)"
+
+    $iscc = Find-InnoSetup
+    if (-not $iscc) {
+        Write-Host "`n    (skipping the installer: Inno Setup 6 is not installed - winget install JRSoftware.InnoSetup)" -ForegroundColor Yellow
+    }
+    else {
+        Step 'Building the installer'
+        $repository = Get-RepositoryUrl
+        $defines = @("/DAppVersion=$version", "/DArch=$($Platform.ToLowerInvariant())", "/DSourceDir=$target",
+            "/DOutputDir=$(Join-Path $root 'artifacts')")
+        if ($repository) { $defines += "/DAppURL=$repository" }
+        # Only its warnings and errors: the rest lists every file it compresses.
+        & $iscc @defines (Join-Path $root 'installer\SpaceWindow.iss') |
+            Where-Object { "$_" -match '^\s*(Warning|Error)|Compile aborted' } | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
+        if ($LASTEXITCODE -ne 0) { throw 'The installer failed to build.' }
+        $setup = Join-Path $root "artifacts\$name-setup.exe"
+        Write-Host "    $setup ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)"
+
+        if ($repository) {
+            Step 'Writing the winget manifest'
+            & (Join-Path $root 'tools\New-WingetManifest.ps1') -Version $version -Repository $repository
+        }
+        else {
+            Write-Host "`n    (skipping the winget manifest: git's origin remote is not a GitHub repository)" -ForegroundColor Yellow
+        }
+    }
 }
 
 Step 'Done'

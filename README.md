@@ -56,21 +56,25 @@ by Sean Werkema; please report SpaceWindow issues here, not to him.
 
 ## Download
 
-1. Download the latest `SpaceWindow-<version>-x64.zip` (or `-arm64.zip`)
-   from the [Releases](../../releases/latest) page.
-2. Unzip it anywhere and run `SpaceWindow.exe`.
+From the [Releases](../../releases/latest) page, download either:
 
-Nothing is installed: the app is a portable folder. The Windows App SDK
-runtime is included and the C runtime comes with Windows, so there is no
-installer, no administrator prompt and no redistributable to install.
-Delete the folder to remove it (settings are kept in
+- **The installer**, `SpaceWindow-<version>-x64-setup.exe` (or
+  `-arm64-setup.exe`). It installs SpaceWindow for all users, with a Start
+  menu entry, and removes it again from **Settings → Apps**.
+- **The portable folder**, `SpaceWindow-<version>-x64.zip` (or `-arm64.zip`).
+  Unzip it anywhere and run `SpaceWindow.exe`; nothing is installed, and
+  deleting the folder removes it.
+
+Either way the Windows App SDK runtime is included and the C runtime comes
+with Windows, so there is no redistributable to install. Settings are kept in
 `HKEY_CURRENT_USER\Software\SpaceWindow`, and any theme files you add in
-`%APPDATA%\SpaceWindow\Themes`).
+`%APPDATA%\SpaceWindow\Themes`; removing the app leaves both.
 
-The download is not code-signed, so Windows SmartScreen may say *"Windows
+The downloads are not code-signed, so Windows SmartScreen may say *"Windows
 protected your PC"*: choose **More info** and **Run anyway**. (To avoid the
-prompt for every file, open the .zip's **Properties** and tick **Unblock**
-before extracting.) You can always [build it yourself](#building-from-source).
+prompt for every file of the portable folder, open the .zip's **Properties**
+and tick **Unblock** before extracting.) You can always
+[build it yourself](#building-from-source).
 
 **Requirements:** Windows 11, x64 or ARM64. (The app declares Windows 10
 version 1809 as its minimum, but only Windows 11 has been tested.)
@@ -377,7 +381,8 @@ which makes them complete examples.
   Windows itself (compact.exe, CompactOS), are measured correctly, and the
   info tip shows both length and size on disk. Dates are in local time.
 - **Folders of any depth** and paths longer than 260 characters.
-- **Portable:** a self-contained folder; nothing to install.
+- **Portable or installed:** a self-contained folder that runs from anywhere,
+  or an installer with a Start menu entry and an uninstaller.
 
 ### Bugs fixed
 
@@ -601,6 +606,9 @@ Where the speed comes from:
 - The NuGet packages (Windows App SDK 2.5.1, C++/WinRT, WIL and the Windows
   SDK build tools) are restored by `build.ps1`, which downloads `nuget.exe` if
   needed and checks that it is signed by Microsoft.
+- For the installer only: [Inno Setup](https://jrsoftware.org/isinfo.php) 6.7
+  or later (`winget install JRSoftware.InnoSetup`). Without it, `build.ps1`
+  makes everything else.
 
 ### Build
 
@@ -612,7 +620,7 @@ cd SpaceWindow
 
 | Command | Does |
 |---|---|
-| `.\build.ps1` | Restore, build Release x64, run the unit tests, package |
+| `.\build.ps1` | Restore, build Release x64, run the unit tests, package (folder, .zip, installer, winget manifest) |
 | `.\build.ps1 -All` | ... plus MSVC code analysis, clang-tidy, the formatting check (`.clang-format`) and the AddressSanitizer test run |
 | `.\build.ps1 -Platform ARM64` | Cross-compile for Windows on Arm |
 | `.\build.ps1 -Configuration Debug -NoPublish` | Debug build, no package |
@@ -627,9 +635,10 @@ You can also open `SpaceWindow.slnx` in Visual Studio 2026 (after one
 AddressSanitizer.
 
 The app is built into `bin\<platform>\<configuration>\SpaceWindow\`, and
-`build.ps1` packages it as `artifacts\SpaceWindow-<version>-<platform>\` and
-a `.zip` of it, ready to upload as a release. The test program has a few
-more uses (reading the master file table needs administrator rights):
+`build.ps1` packages it as `artifacts\SpaceWindow-<version>-<platform>\`, a
+`.zip` of it and an installer, `SpaceWindow-<version>-<platform>-setup.exe`
+(see [Publishing a release](#publishing-a-release)). The test program has a
+few more uses (reading the master file table needs administrator rights):
 
 | `bin\x64\Release\CoreTests\CoreTests.exe` | Does |
 |---|---|
@@ -646,6 +655,42 @@ brushes by; `src/App/ChromeThemeKeys.h` lists them, generated from the Windows
 App SDK's `generic.xaml`. After updating the Windows App SDK, run
 `python tools\make_theme_keys.py` to bring it up to date.
 
+### Publishing a release
+
+Set the version in `build.ps1` (and the files its comment names), then build
+both platforms: `.\build.ps1` and `.\build.ps1 -Platform ARM64`. With Inno
+Setup installed, `artifacts\` then holds each platform's folder, `.zip` and
+installer, and the release's winget manifest in
+`artifacts\winget\manifests\r\recompiler\SpaceWindow\<version>\`. The
+manifest expects the installers in the GitHub release `v<version>` and pins
+their SHA-256 hashes, so upload the files of that same build, unchanged.
+
+1. Create the release `v<version>` on GitHub and upload the two `.zip` files
+   and the two installers.
+2. Check the manifest and try it, installing from the release (the first
+   command once, as administrator):
+
+   ```powershell
+   winget settings --enable LocalManifestFiles
+   winget validate --manifest artifacts\winget\manifests\r\recompiler\SpaceWindow\<version>
+   winget install --manifest artifacts\winget\manifests\r\recompiler\SpaceWindow\<version>
+   ```
+
+3. Submit it to the [winget package repository](https://github.com/microsoft/winget-pkgs)
+   with [WinGetCreate](https://github.com/microsoft/winget-create)
+   (`winget install wingetcreate`), which signs in to GitHub and opens the
+   pull request. Automated checks and a moderator review it; on a first pull
+   request, a bot also asks you to sign Microsoft's contributor agreement.
+
+   ```powershell
+   wingetcreate submit artifacts\winget\manifests\r\recompiler\SpaceWindow\<version>
+   ```
+
+Once merged, `winget install recompiler.SpaceWindow` installs SpaceWindow.
+Later versions can skip the manifest: after uploading their installers,
+`wingetcreate update recompiler.SpaceWindow --version <version> --urls
+<x64 installer URL> <arm64 installer URL> --submit` writes and submits it.
+
 ### Project layout
 
 ```
@@ -656,7 +701,8 @@ src/Core/                         static library: scanner, layouts, settings, te
 src/App/                          the WinUI 3 app
 tests/CoreTests/                  unit tests, drive tests, the scanner benchmark and comparison
 tests/Ui/                         a smoke test of the app, without keyboard or mouse input
-tools/                            clang-tidy runner, window capture, icon and theme-key generators
+installer/SpaceWindow.iss         the installer (Inno Setup), built by build.ps1
+tools/                            clang-tidy runner, window capture, winget manifest, icon and theme-key generators
 .clang-format                     how the code is formatted (checked by build.ps1 -Analyze)
 docs/screenshots/                 the pictures in this README
 ```
