@@ -30,8 +30,8 @@ namespace sm
     // The window and its controls.
     struct WindowColors
     {
-        Rgb background;     // the window
-        Rgb surface;        // dialogs, menus and tips
+        Rgb background;  // the window
+        Rgb surface;     // dialogs, menus and tips
         Rgb text;
         Rgb secondaryText;  // captions and hints
         Rgb accent;         // default buttons, toggles, check boxes, links, the zoom outline
@@ -55,8 +55,8 @@ namespace sm
 
     struct Theme
     {
-        std::wstring id;       // "system", "light", "dark", "dracula", "alucard", or a theme file's name
-        std::wstring name;     // shown in Settings (the classic themes' names come from the language tables)
+        std::wstring id;    // "system", "light", "dark", "dracula", "alucard", or a theme file's name
+        std::wstring name;  // shown in Settings (the classic themes' names come from the language tables)
         ThemeBase base = ThemeBase::System;
         bool classic = false;  // the Windows look and SpaceMonger's colours; `window` and `map` are unused
         WindowColors window;

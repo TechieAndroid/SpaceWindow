@@ -41,7 +41,8 @@ namespace
         {
             wchar_t temp[MAX_PATH + 1]{};
             CHECK(GetTempPathW(static_cast<DWORD>(std::size(temp)), temp) != 0);
-            std::wstring const folder = std::wstring(temp) + L"SpaceWindow volume test " + std::to_wstring(GetCurrentProcessId());
+            std::wstring const folder =
+                std::wstring(temp) + L"SpaceWindow volume test " + std::to_wstring(GetCurrentProcessId());
             Remove(folder);  // left over from an interrupted run
             CHECK(CreateDirectoryW(folder.c_str(), nullptr));
             // The long form: the master file table has no short (8.3) names to look up.
@@ -107,7 +108,8 @@ namespace
 
     wil::unique_hfile Create(std::wstring const& path, DWORD access = GENERIC_WRITE)
     {
-        wil::unique_hfile file(CreateFileW(path.c_str(), access, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+        wil::unique_hfile file(
+            CreateFileW(path.c_str(), access, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
         CHECK(file.is_valid());
         return file;
     }
@@ -141,7 +143,8 @@ namespace
         wil::unique_hfile const file = Create(path, GENERIC_READ | GENERIC_WRITE);
         USHORT format = COMPRESSION_FORMAT_DEFAULT;
         DWORD returned = 0;
-        (void)DeviceIoControl(file.get(), FSCTL_SET_COMPRESSION, &format, sizeof(format), nullptr, 0, &returned, nullptr);
+        (void)DeviceIoControl(file.get(), FSCTL_SET_COMPRESSION, &format, sizeof(format), nullptr, 0, &returned,
+                              nullptr);
         Append(file.get(), 1 << 20, true);
         CHECK(FlushFileBuffers(file.get()));
     }
@@ -151,7 +154,8 @@ namespace
     void MakeWofFile(std::wstring const& path)
     {
         MakeFile(path, 1 << 20, true);
-        wil::unique_hfile const file(CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+        wil::unique_hfile const file(
+            CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
         CHECK(file.is_valid());
         struct
         {
@@ -160,14 +164,15 @@ namespace
         } info{ { WOF_CURRENT_VERSION, WOF_PROVIDER_FILE },
                 { FILE_PROVIDER_CURRENT_VERSION, FILE_PROVIDER_COMPRESSION_XPRESS4K, 0 } };
         DWORD returned = 0;
-        (void)DeviceIoControl(file.get(), FSCTL_SET_EXTERNAL_BACKING, &info, sizeof(info), nullptr, 0, &returned, nullptr);
+        (void)DeviceIoControl(file.get(), FSCTL_SET_EXTERNAL_BACKING, &info, sizeof(info), nullptr, 0, &returned,
+                              nullptr);
     }
 
     std::uint64_t RecordOf(std::wstring const& path)
     {
-        wil::unique_hfile const file(CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
-                                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                                                 FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        wil::unique_hfile const file(
+            CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
         CHECK(file.is_valid());
         BY_HANDLE_FILE_INFORMATION info{};
         CHECK(GetFileInformationByHandle(file.get(), &info));
@@ -204,7 +209,8 @@ namespace
             }
             Sleep(100);
         }
-        test::Fail("the attribute list of " + test::ToUtf8(name) + " never reached the disk", std::source_location::current());
+        test::Fail("the attribute list of " + test::ToUtf8(name) + " never reached the disk",
+                   std::source_location::current());
     }
 
     // Files of every kind the two scanners must agree on.
@@ -242,7 +248,7 @@ namespace
         sm::ScanProgress progress;
         sm::ScanResult result = sm::ScanFolder(sandbox.Drive(), progress, std::stop_token{});
         bool const readTheTable = result.tree && result.tree->method == sm::ScanMethod::MasterFileTable;
-        CHECK(readTheTable);  // needs administrator rights and NTFS
+        CHECK(readTheTable);                      // needs administrator rights and NTFS
         CHECK(result.tree->journal.has_value());  // caught up with the changes made while it was read
         return std::move(result.tree);
     }
@@ -321,8 +327,8 @@ namespace
                     ++files;
                 }
             }
-            if (fileBytes != folder.sizeFiles || folderBytes != folder.sizeSubfolders || logical != folder.logicalTotal ||
-                files != folder.fileCount || folders != folder.folderCount)
+            if (fileBytes != folder.sizeFiles || folderBytes != folder.sizeSubfolders ||
+                logical != folder.logicalTotal || files != folder.fileCount || folders != folder.folderCount)
             {
                 ++problems;
             }
@@ -340,7 +346,8 @@ namespace
         return used <= disk.size() && used <= current.size() && arrayEnd <= used &&
                Field<std::uint32_t>(current, 0x18) == used &&
                std::equal(disk.begin(), disk.begin() + static_cast<std::ptrdiff_t>(array), current.begin()) &&
-               std::equal(disk.begin() + static_cast<std::ptrdiff_t>(arrayEnd), disk.begin() + static_cast<std::ptrdiff_t>(used),
+               std::equal(disk.begin() + static_cast<std::ptrdiff_t>(arrayEnd),
+                          disk.begin() + static_cast<std::ptrdiff_t>(used),
                           current.begin() + static_cast<std::ptrdiff_t>(arrayEnd));
     }
 }
@@ -392,7 +399,8 @@ VOLUME_TEST_CASE(MasterFileTableIsReadInFull)
                 ++compared;
                 if (!SameRecord(record, current) && ++differing <= 5)
                 {
-                    std::printf("      record %llu differs from the file system's copy\n", static_cast<unsigned long long>(number));
+                    std::printf("      record %llu differs from the file system's copy\n",
+                                static_cast<unsigned long long>(number));
                 }
             }
         });
@@ -421,8 +429,8 @@ VOLUME_TEST_CASE(RescanSeesFilesGrowingWhileOpen)
     // The journal names a changed file once until it is closed.
     Sandbox const sandbox;
     // A download in progress: written before the scan, and still after it.
-    wil::unique_hfile const download(CreateFileW(sandbox[L"download.part"].c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-                                                 CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+    wil::unique_hfile const download(CreateFileW(sandbox[L"download.part"].c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                                 nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     // A virtual machine's disk, open since long before the scan.
     wil::unique_hfile const disk(CreateFileW(sandbox[L"disk.vhdx"].c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
@@ -440,8 +448,7 @@ VOLUME_TEST_CASE(RescanSeesFilesGrowingWhileOpen)
 
     Append(download.get(), std::uint64_t{ 10 } << 20);
     Append(disk.get(), std::uint64_t{ 10 } << 20);
-    sm::JournalRead const read =
-        sm::ReadJournalChanges(position, std::stop_token{}, 0, 0, sm::LargeFiles(*drive->Root()));
+    sm::JournalRead const read = sm::ReadJournalChanges(position, std::stop_token{}, 0, 0, sm::LargeFiles(*drive));
     CHECK(read.status == sm::JournalReadStatus::Ready);
     sm::ApplyJournalChanges(*drive, read.changes);
 
@@ -476,7 +483,8 @@ VOLUME_TEST_CASE(ChangeJournalRescanMatchesTheFolderScanner)
     // Files and folders made, renamed, moved, grown, shrunk and deleted.
     CHECK(MoveFileW(sandbox[L"tiny.txt"].c_str(), sandbox[L"renamed.txt"].c_str()));
     {
-        wil::unique_hfile const file(CreateFileW(sandbox[L"big.bin"].c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+        wil::unique_hfile const file(
+            CreateFileW(sandbox[L"big.bin"].c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
         CHECK(file.is_valid());
         CHECK(SetFilePointerEx(file.get(), LARGE_INTEGER{}, nullptr, FILE_END));
         Append(file.get(), 1 << 20);
@@ -503,7 +511,8 @@ VOLUME_TEST_CASE(ChangeJournalRescanMatchesTheFolderScanner)
     CHECK(read.status == sm::JournalReadStatus::Ready);
     auto const changed = [&read](std::wstring const& path) {
         std::uint64_t const record = RecordOf(path);
-        return std::ranges::any_of(read.changes.files, [record](sm::ChangedFile const& file) { return file.record == record; });
+        return std::ranges::any_of(read.changes.files,
+                                   [record](sm::ChangedFile const& file) { return file.record == record; });
     };
     CHECK(changed(sandbox[L"renamed.txt"]));
     CHECK(changed(sandbox[L"new\\fresh.txt"]));

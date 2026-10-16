@@ -2,14 +2,21 @@
 #include "pch.h"
 #include "TestHarness.h"
 
+#include "../../src/Core/Commands.h"
 #include "../../src/Core/Format.h"
 #include "../../src/Core/Lang.h"
 #include "../../src/Core/Palette.h"
 
 namespace
 {
-    sm::Lang const& Us() { return sm::FindLanguage(L"us"); }
-    sm::Lang const& Fr() { return sm::FindLanguage(L"fr"); }
+    sm::Lang const& Us()
+    {
+        return sm::FindLanguage(L"us");
+    }
+    sm::Lang const& Fr()
+    {
+        return sm::FindLanguage(L"fr");
+    }
 
     constexpr std::uint64_t KiB = 1024;
     constexpr std::uint64_t MiB = KiB * 1024;
@@ -94,8 +101,7 @@ TEST_CASE(FormatFileTimeUsesLocalTime)
 TEST_CASE(FormatAttributesListsNames)
 {
     CHECK_EQ(sm::FormatAttributes(0, Us()), std::wstring());
-    CHECK_EQ(sm::FormatAttributes(FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM, Us()),
-             std::wstring(L"Hidden System"));
+    CHECK_EQ(sm::FormatAttributes(FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM, Us()), std::wstring(L"Hidden System"));
     CHECK_EQ(sm::FormatAttributes(FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_ARCHIVE, Fr()),
              std::wstring(L"Archive Lecture seule"));
 }
@@ -126,6 +132,7 @@ TEST_CASE(LanguagesAreComplete)
     // A positional initializer that skipped a string shifted every later one;
     // with designated initializers a forgotten string is simply empty.
     using Field = std::wstring_view sm::Lang::*;
+    // clang-format off: laid out by hand
     static constexpr Field kFields[] = {
         &sm::Lang::code, &sm::Lang::name, &sm::Lang::locale, &sm::Lang::aboutApp, &sm::Lang::freeware,
         &sm::Lang::warranty, &sm::Lang::credits, &sm::Lang::ok, &sm::Lang::cancel, &sm::Lang::bytes, &sm::Lang::kb,
@@ -139,7 +146,9 @@ TEST_CASE(LanguagesAreComplete)
         &sm::Lang::foldersFound, &sm::Lang::onDisk, &sm::Lang::unreadableFolders, &sm::Lang::smallerItems,
         &sm::Lang::fullRescan, &sm::Lang::rescanFolder, &sm::Lang::hardLink, &sm::Lang::unreadableFolder,
         &sm::Lang::unreadableTitle, &sm::Lang::unreadableText, &sm::Lang::moreFolders, &sm::Lang::copyList,
-        &sm::Lang::close, &sm::Lang::keyboardShortcuts, &sm::Lang::selectDrive, &sm::Lang::browseFolder,
+        &sm::Lang::close, &sm::Lang::invertedPie, &sm::Lang::tbInvertedPie, &sm::Lang::backgroundAnimation,
+        &sm::Lang::backgroundAnimationHint, &sm::Lang::keyboardShortcuts, &sm::Lang::selectDrive,
+        &sm::Lang::browseFolder,
         &sm::Lang::scanning, &sm::Lang::scanFailed, &sm::Lang::confirmDeleteTitle, &sm::Lang::confirmDelete,
         &sm::Lang::deleteFailed, &sm::Lang::emptyTitle, &sm::Lang::emptyText, &sm::Lang::settings,
         &sm::Lang::layout, &sm::Lang::density, &sm::Lang::bias, &sm::Lang::horz, &sm::Lang::equal, &sm::Lang::vert,
@@ -150,6 +159,7 @@ TEST_CASE(LanguagesAreComplete)
         &sm::Lang::savePos, &sm::Lang::showRolloverBox, &sm::Lang::appearance, &sm::Lang::theme,
         &sm::Lang::themesFolder, &sm::Lang::themeErrors, &sm::Lang::language,
     };
+    // clang-format on
 
     std::set<std::wstring_view> codes;
     for (sm::Lang const& lang : sm::Languages())
@@ -160,31 +170,29 @@ TEST_CASE(LanguagesAreComplete)
         {
             CHECK(!(lang.*field).empty());
         }
-        for (auto const& list : { std::span<std::wstring_view const>(lang.densityNames),
-                                  std::span<std::wstring_view const>(lang.colorNames),
-                                  std::span<std::wstring_view const>(lang.monthNames),
-                                  std::span<std::wstring_view const>(lang.attributeNames),
-                                  std::span<std::wstring_view const>(lang.themeNames) })
+        for (auto const& list :
+             { std::span<std::wstring_view const>(lang.densityNames),
+               std::span<std::wstring_view const>(lang.colorNames), std::span<std::wstring_view const>(lang.monthNames),
+               std::span<std::wstring_view const>(lang.attributeNames),
+               std::span<std::wstring_view const>(lang.themeNames),
+               std::span<std::wstring_view const>(lang.backdropNames) })
         {
             for (std::wstring_view const name : list)
             {
                 CHECK(!name.empty());
             }
         }
-        // Every shortcut is listed, and each of its keys gets a key cap.
-        for (sm::Shortcut const& shortcut : lang.shortcuts)
+        // Every key has a name for its key cap, and every command with keys says what it does.
+        sm::KeyNames const& keys = lang.keyNames;
+        for (std::wstring_view const key : { keys.ctrl, keys.shift, keys.alt, keys.enter, keys.backspace, keys.home,
+                                             keys.escape, keys.del, keys.menu })
         {
-            CHECK(!shortcut.action.empty());
-            auto const alternatives = sm::SplitShortcut(shortcut.keys);
-            CHECK(!alternatives.empty());
-            for (auto const& keys : alternatives)
-            {
-                CHECK(!keys.empty());
-                for (std::wstring_view const key : keys)
-                {
-                    CHECK(!key.empty() && key.front() != L' ' && key.back() != L' ');
-                }
-            }
+            CHECK(!key.empty() && key.front() != L' ' && key.back() != L' ' &&
+                  key.find(L'+') == std::wstring_view::npos);
+        }
+        for (sm::Command const command : sm::CommandsWithKeys())
+        {
+            CHECK(!sm::ShortcutAction(command, lang).empty());
         }
         CHECK(lang.decimalPoint != lang.thousandsSeparator);
         CHECK(sm::FormatText(lang.confirmDelete, { L"\x1", L"\x2" }).find(L'\x1') != std::wstring::npos);
@@ -194,28 +202,16 @@ TEST_CASE(LanguagesAreComplete)
     CHECK_EQ(&sm::FindLanguage(L"zz"), &sm::Languages().front());
 }
 
-TEST_CASE(ShortcutsSplitIntoKeys)
-{
-    using Keys = std::vector<std::wstring_view>;
-    auto const split = sm::SplitShortcut(L"Alt+↑ / Backspace");
-    CHECK_EQ(split.size(), std::size_t{ 2 });
-    CHECK(split.at(0) == (Keys{ L"Alt", L"↑" }));
-    CHECK(split.at(1) == (Keys{ L"Backspace" }));
-    CHECK(sm::SplitShortcut(L"Ctrl+Shift+C").at(0) == (Keys{ L"Ctrl", L"Shift", L"C" }));
-    CHECK(sm::SplitShortcut(L"Retour arrière").at(0) == (Keys{ L"Retour arrière" }));  // spaces inside a key stay
-    CHECK(sm::SplitShortcut(L"").empty());
-}
-
 TEST_CASE(ContextMenuAccessKeysAreUnique)
 {
     // 1.4.0 used O for both "Zoom &Out" and "&Open Drive...".
     for (sm::Lang const& lang : sm::Languages())
     {
         std::set<wchar_t> keys;
-        for (std::wstring_view const caption : { lang.zoomIn, lang.zoomOut, lang.zoomFull, lang.run, lang.del,
-                                                lang.openDrive, lang.rescanDrive, lang.fullRescan, lang.rescanFolder,
-                                                lang.showFreeSpace, lang.pieChart, lang.properties,
-                                                lang.showInExplorer, lang.copyPath })
+        for (std::wstring_view const caption :
+             { lang.zoomIn, lang.zoomOut, lang.zoomFull, lang.run, lang.del, lang.openDrive, lang.rescanDrive,
+               lang.fullRescan, lang.rescanFolder, lang.showFreeSpace, lang.pieChart, lang.invertedPie, lang.properties,
+               lang.showInExplorer, lang.copyPath })
         {
             std::wstring const key = sm::ParseCaption(caption).accessKey;
             CHECK_EQ(key.size(), std::size_t{ 1 });

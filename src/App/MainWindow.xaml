@@ -36,25 +36,11 @@
           Keyboard shortcuts belong to the window, not to the toolbar buttons:
           when the window is narrow the toolbar moves buttons into its overflow
           menu, and a button's own shortcut stops working while it is there.
-          The buttons only show the shortcut (KeyboardAcceleratorTextOverride),
-          and the window itself shows none (no "Ctrl+O" tooltip over the map).
+          They are made in code (MainWindow.xaml.cpp) from the table that
+          Settings lists them from (src/Core/Commands.cpp), as are the
+          buttons' Click handlers and the shortcuts they show.  The window
+          itself shows none (no "Ctrl+O" tooltip over the map).
         -->
-        <Grid.KeyboardAccelerators>
-            <KeyboardAccelerator Key="O" Modifiers="Control" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="F5" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="F5" Modifiers="Shift" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="Home" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="Back" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="Up" Modifiers="Menu" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="Down" Modifiers="Menu" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="Right" Modifiers="Menu" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="P" Modifiers="Control" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="Delete" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="F1" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="Enter" Modifiers="Menu" Invoked="OnShortcut" />
-            <KeyboardAccelerator Key="C" Modifiers="Control,Shift" Invoked="OnShortcut" />
-        </Grid.KeyboardAccelerators>
 
         <TitleBar x:Name="AppTitleBar" Title="SpaceWindow">
             <TitleBar.IconSource>
@@ -70,79 +56,85 @@
             HorizontalAlignment="Left"
             Background="Transparent"
             DefaultLabelPosition="Right">
-            <AppBarButton x:Name="OpenButton" Click="OnOpen" KeyboardAcceleratorTextOverride="Ctrl+O">
+            <AppBarButton x:Name="OpenButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE838;" />
                 </AppBarButton.Icon>
             </AppBarButton>
-            <AppBarButton x:Name="RescanButton" Click="OnRescan" KeyboardAcceleratorTextOverride="F5">
+            <AppBarButton x:Name="RescanButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE72C;" />
                 </AppBarButton.Icon>
             </AppBarButton>
             <AppBarSeparator />
-            <AppBarButton x:Name="ZoomFullButton" Click="OnZoomFull" KeyboardAcceleratorTextOverride="Home">
+            <AppBarButton x:Name="ZoomFullButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE9A6;" />
                 </AppBarButton.Icon>
             </AppBarButton>
-            <AppBarButton x:Name="ZoomInButton" Click="OnZoomIn" KeyboardAcceleratorTextOverride="Enter">
+            <AppBarButton x:Name="ZoomInButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE8A3;" />
                 </AppBarButton.Icon>
             </AppBarButton>
-            <AppBarButton x:Name="ZoomOutButton" Click="OnZoomOut" KeyboardAcceleratorTextOverride="Backspace">
+            <AppBarButton x:Name="ZoomOutButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE71F;" />
                 </AppBarButton.Icon>
             </AppBarButton>
             <AppBarSeparator />
-            <AppBarToggleButton x:Name="FreeSpaceButton" Click="OnToggleFreeSpace" IsChecked="True">
+            <AppBarToggleButton x:Name="FreeSpaceButton" IsChecked="True">
                 <AppBarToggleButton.Icon>
                     <FontIcon Glyph="&#xEDA2;" />
                 </AppBarToggleButton.Icon>
             </AppBarToggleButton>
             <!-- New in SpaceWindow: draw the map as a pie chart instead of a treemap. -->
-            <AppBarToggleButton x:Name="PieChartButton" Click="OnTogglePieChart" KeyboardAcceleratorTextOverride="Ctrl+P">
+            <AppBarToggleButton x:Name="PieChartButton">
                 <AppBarToggleButton.Icon>
                     <FontIcon Glyph="&#xEB05;" />
                 </AppBarToggleButton.Icon>
             </AppBarToggleButton>
+            <!-- New in SpaceWindow: the pie chart turned inside out - the folder as the outer ring, deeper levels inward. -->
+            <AppBarToggleButton x:Name="InvertedPieButton">
+                <AppBarToggleButton.Icon>
+                    <FontIcon Glyph="&#xE7C8;" />
+                </AppBarToggleButton.Icon>
+            </AppBarToggleButton>
             <AppBarSeparator />
-            <AppBarButton x:Name="RunButton" Click="OnRun">
+            <AppBarButton x:Name="RunButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE768;" />
                 </AppBarButton.Icon>
             </AppBarButton>
-            <AppBarButton x:Name="DeleteButton" Click="OnDelete" KeyboardAcceleratorTextOverride="Del">
+            <AppBarButton x:Name="DeleteButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE74D;" />
                 </AppBarButton.Icon>
             </AppBarButton>
             <AppBarSeparator />
-            <AppBarButton x:Name="SettingsButton" Click="OnSettings">
+            <AppBarButton x:Name="SettingsButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE713;" />
                 </AppBarButton.Icon>
             </AppBarButton>
-            <AppBarButton x:Name="AboutButton" Click="OnAbout" KeyboardAcceleratorTextOverride="F1">
+            <AppBarButton x:Name="AboutButton">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE897;" />
                 </AppBarButton.Icon>
             </AppBarButton>
 
             <CommandBar.SecondaryCommands>
-                <AppBarButton x:Name="PropertiesButton" Click="OnProperties" KeyboardAcceleratorTextOverride="Alt+Enter">
+                <AppBarButton x:Name="PropertiesButton">
                     <AppBarButton.Icon>
                         <FontIcon Glyph="&#xE946;" />
                     </AppBarButton.Icon>
                 </AppBarButton>
-                <AppBarButton x:Name="ExplorerButton" Click="OnShowInExplorer">
+                <AppBarButton x:Name="ExplorerButton">
                     <AppBarButton.Icon>
                         <FontIcon Glyph="&#xEC50;" />
                     </AppBarButton.Icon>
                 </AppBarButton>
-                <AppBarButton x:Name="CopyPathButton" Click="OnCopyPath" KeyboardAcceleratorTextOverride="Ctrl+Shift+C">
+                <AppBarButton x:Name="CopyPathButton">
                     <AppBarButton.Icon>
                         <FontIcon Glyph="&#xE8C8;" />
                     </AppBarButton.Icon>
@@ -199,7 +191,6 @@
                 <Button
                     x:Name="EmptyOpenButton"
                     HorizontalAlignment="Center"
-                    Click="OnOpen"
                     Style="{StaticResource AccentButtonStyle}" />
             </StackPanel>
 
@@ -386,6 +377,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <ComboBox
                             x:Name="LanguageBox"
@@ -409,6 +401,22 @@
                             IsClosable="False"
                             IsOpen="False"
                             Severity="Warning" />
+                        <!-- New in SpaceWindow: an animation in the space the map leaves free.  Picking one shows it at once. -->
+                        <ComboBox
+                            x:Name="BackdropBox"
+                            Grid.Row="3"
+                            Margin="0,4,0,0"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="OnBackdropPreview" />
+                        <TextBlock
+                            x:Name="BackdropHint"
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            Margin="0,0,0,6"
+                            VerticalAlignment="Bottom"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            TextWrapping="Wrap" />
                     </Grid>
 
                     <TextBlock

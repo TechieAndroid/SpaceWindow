@@ -112,8 +112,7 @@ namespace sm
 
         SYSTEMTIME universal{};
         SYSTEMTIME local{};
-        if (!FileTimeToSystemTime(&utc, &universal) ||
-            !SystemTimeToTzSpecificLocalTimeEx(nullptr, &universal, &local))
+        if (!FileTimeToSystemTime(&utc, &universal) || !SystemTimeToTzSpecificLocalTimeEx(nullptr, &universal, &local))
         {
             return {};
         }

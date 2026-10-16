@@ -19,7 +19,8 @@ namespace sm
         constexpr std::size_t kMaxFiles = 5'000;
 
         constexpr DWORD kWatched = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
-                                   FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE;
+                                   FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE |
+                                   FILE_NOTIFY_CHANGE_LAST_WRITE;
     }
 
     std::shared_ptr<FolderWatch> FolderWatch::Start(std::wstring const& folder, bool remote)
@@ -74,7 +75,8 @@ namespace sm
         std::array<HANDLE, 2> const events{ done_.get(), stop_.get() };
         for (;;)
         {
-            if (WaitForMultipleObjects(static_cast<DWORD>(events.size()), events.data(), FALSE, INFINITE) != WAIT_OBJECT_0)
+            if (WaitForMultipleObjects(static_cast<DWORD>(events.size()), events.data(), FALSE, INFINITE) !=
+                WAIT_OBJECT_0)
             {
                 break;  // stopping
             }

@@ -31,6 +31,7 @@ namespace sm
         // Values new in SpaceWindow.
         constexpr wchar_t kTheme[] = L"theme";
         constexpr wchar_t kViewMode[] = L"view_mode";
+        constexpr wchar_t kBackdrop[] = L"background_animation";
         constexpr wchar_t kWindowX[] = L"window_x";
         constexpr wchar_t kWindowY[] = L"window_y";
         constexpr wchar_t kWindowWidth[] = L"window_width";
@@ -44,7 +45,8 @@ namespace sm
             {
                 Key key;
                 std::wstring const name(path);
-                if (RegOpenKeyExW(HKEY_CURRENT_USER, name.c_str(), 0, KEY_QUERY_VALUE, key.handle_.put()) != ERROR_SUCCESS)
+                if (RegOpenKeyExW(HKEY_CURRENT_USER, name.c_str(), 0, KEY_QUERY_VALUE, key.handle_.put()) !=
+                    ERROR_SUCCESS)
                 {
                     key.handle_.reset();
                 }
@@ -58,7 +60,8 @@ namespace sm
             {
                 DWORD data = 0;
                 DWORD size = sizeof(data);
-                if (RegGetValueW(handle_.get(), nullptr, name, RRF_RT_REG_DWORD, nullptr, &data, &size) == ERROR_SUCCESS)
+                if (RegGetValueW(handle_.get(), nullptr, name, RRF_RT_REG_DWORD, nullptr, &data, &size) ==
+                    ERROR_SUCCESS)
                 {
                     value = static_cast<int>(data);
                 }
@@ -175,9 +178,13 @@ namespace sm
         {
             theme = L"system";
         }
-        if (viewMode != ViewMode::Pie)
+        if (viewMode != ViewMode::Pie && viewMode != ViewMode::InvertedPie)
         {
             viewMode = ViewMode::Treemap;
+        }
+        if (int const kind = static_cast<int>(backdrop); kind < 0 || kind >= kBackdropCount)
+        {
+            backdrop = Backdrop::None;
         }
 
         // Language codes are two lower-case letters; anything else means "follow Windows".
@@ -224,6 +231,9 @@ namespace sm
             int viewMode = static_cast<int>(settings.viewMode);
             current.Read(kViewMode, viewMode);
             settings.viewMode = static_cast<ViewMode>(viewMode);
+            int backdrop = static_cast<int>(settings.backdrop);
+            current.Read(kBackdrop, backdrop);
+            settings.backdrop = static_cast<Backdrop>(backdrop);
             current.Read(kWindowX, settings.window.x);
             current.Read(kWindowY, settings.window.y);
             current.Read(kWindowWidth, settings.window.width);
@@ -268,6 +278,7 @@ namespace sm
         ok &= Write(k, kLang, s.language);
         ok &= Write(k, kTheme, s.theme);
         ok &= Write(k, kViewMode, static_cast<int>(s.viewMode));
+        ok &= Write(k, kBackdrop, static_cast<int>(s.backdrop));
         ok &= Write(k, kWindowX, s.window.x);
         ok &= Write(k, kWindowY, s.window.y);
         ok &= Write(k, kWindowWidth, s.window.width);

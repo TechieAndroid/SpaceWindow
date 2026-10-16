@@ -123,8 +123,9 @@ TEST_CASE(PieSlicesShareTheCircleInProportion)
     CHECK_EQ(items[0].depth, 3);  // the colour follows the depth in the whole tree, as in the treemap
 
     // One ring fills everything between the hub and the edge.
-    CHECK(Near(pie.HubRadius(), 0.2 * pie.Radius()));
-    CHECK(Near(pie.InnerRadius(0), pie.HubRadius()) && Near(pie.OuterRadius(0), pie.Radius()));
+    CHECK(Near(pie.HubInner(), 0.0) && Near(pie.HubOuter(), 0.2 * pie.Radius()));
+    CHECK(Near(pie.RingsInner(), pie.HubOuter()) && Near(pie.RingsOuter(), pie.Radius()));
+    CHECK(Near(pie.InnerRadius(0), pie.HubOuter()) && Near(pie.OuterRadius(0), pie.Radius()));
     CheckInvariants(pie, 3);
 }
 
@@ -241,13 +242,13 @@ TEST_CASE(PieHitTestingFindsSlicesByAngleAndRing)
     CHECK(pie.HubContains(center.x, center.y));
     CHECK(!pie.HubContains(center.x + 150.0, center.y));
 
-    CHECK_EQ(HitAt(pie, 200.0, 0.8 * kPi), 0);   // the folder, in the ring around the hub
-    CHECK_EQ(HitAt(pie, 400.0, 0.8 * kPi), 1);   // its larger file, one ring out
-    CHECK_EQ(HitAt(pie, 400.0, 1.4 * kPi), 2);   // its smaller file
-    CHECK_EQ(HitAt(pie, 200.0, 1.8 * kPi), 3);   // the root's file...
-    CHECK_EQ(HitAt(pie, 400.0, 1.8 * kPi), -1);  // ... has nothing beyond it
-    CHECK_EQ(HitAt(pie, 600.0, 0.8 * kPi), -1);  // outside the pie
-    CHECK_EQ(HitAt(pie, 200.0, 0.0), 0);         // twelve o'clock starts the first slice
+    CHECK_EQ(HitAt(pie, 200.0, 0.8 * kPi), 0);      // the folder, in the ring around the hub
+    CHECK_EQ(HitAt(pie, 400.0, 0.8 * kPi), 1);      // its larger file, one ring out
+    CHECK_EQ(HitAt(pie, 400.0, 1.4 * kPi), 2);      // its smaller file
+    CHECK_EQ(HitAt(pie, 200.0, 1.8 * kPi), 3);      // the root's file...
+    CHECK_EQ(HitAt(pie, 400.0, 1.8 * kPi), -1);     // ... has nothing beyond it
+    CHECK_EQ(HitAt(pie, 600.0, 0.8 * kPi), -1);     // outside the pie
+    CHECK_EQ(HitAt(pie, 200.0, 0.0), 0);            // twelve o'clock starts the first slice
     CHECK_EQ(HitAt(pie, 200.0, kTwoPi - 1e-6), 3);  // ... and ends the last
 
     std::vector<int> chain;
@@ -262,6 +263,75 @@ TEST_CASE(PieHitTestingFindsSlicesByAngleAndRing)
     CHECK_EQ(pie.FindFolder(&folder), 0);
     CHECK_EQ(pie.Find(&root, pie.Items()[3].index), 3);
     CHECK_EQ(pie.Find(&folder, 99), -1);
+}
+
+TEST_CASE(InvertedPieTravelsInward)
+{
+    // Experimental: the folder as a rim around the edge, its contents the ring
+    // inside it, each level deeper one ring further in, down to the centre.
+    sm::Folder root;
+    sm::Folder& folder = AddFolder(root, L"folder");
+    AddFile(folder, L"inner-a", 600);
+    AddFile(folder, L"inner-b", 200);
+    AddFile(root, L"file", 200);
+    Finish(root);
+
+    sm::PieLayout normal;
+    normal.Build(&root, 0, 1001, 1001, Options());
+    sm::PieOptions options = Options();
+    options.inverted = true;
+    sm::PieLayout pie;
+    pie.Build(&root, 0, 1001, 1001, options);
+
+    // The same slices at the same angles: only the rings change places.
+    CHECK_EQ(pie.Rings(), normal.Rings());
+    CHECK_EQ(pie.Items().size(), normal.Items().size());
+    for (std::size_t i = 0; i < pie.Items().size() && i < normal.Items().size(); ++i)
+    {
+        sm::PieSlice const& a = pie.Items()[i];
+        sm::PieSlice const& b = normal.Items()[i];
+        CHECK(a.ring == b.ring && a.index == b.index && Near(a.start, b.start) && Near(a.sweep, b.sweep));
+    }
+
+    // Ring 1 from the centre to 225.2 pixels, ring 0 to 450.45, the rim (the
+    // folder itself, in place of the hub) to 500.5.
+    CHECK(Near(pie.HubInner(), 0.9 * pie.Radius()) && Near(pie.HubOuter(), pie.Radius()));
+    CHECK(Near(pie.RingsInner(), 0.0) && Near(pie.RingsOuter(), pie.HubInner()));
+    CHECK(Near(pie.OuterRadius(0), pie.RingsOuter()) && Near(pie.InnerRadius(0), pie.OuterRadius(1)));
+    CHECK_EQ(pie.InnerRadius(1), 0.0);           // the innermost slices meet in the centre
+    CHECK_EQ(HitAt(pie, 400.0, 0.8 * kPi), 0);   // the folder, the outermost ring
+    CHECK_EQ(HitAt(pie, 200.0, 0.8 * kPi), 1);   // its larger file, one ring in
+    CHECK_EQ(HitAt(pie, 10.0, 0.8 * kPi), 1);    // ... right to the centre
+    CHECK_EQ(HitAt(pie, 200.0, 1.4 * kPi), 2);   // its smaller file
+    CHECK_EQ(HitAt(pie, 400.0, 1.8 * kPi), 3);   // the root's file...
+    CHECK_EQ(HitAt(pie, 200.0, 1.8 * kPi), -1);  // ... has nothing inside it
+    CHECK_EQ(HitAt(pie, 480.0, 0.8 * kPi), -1);  // the rim
+    sm::PiePoint const rim = At(pie, 480.0, 0.3 * kPi);
+    CHECK(pie.HubContains(rim.x, rim.y));
+    CHECK(!pie.HubContains(pie.Center().x, pie.Center().y));
+
+    std::vector<int> chain;
+    sm::PiePoint const point = At(pie, 200.0, 1.4 * kPi);
+    pie.ContainersAt(point.x, point.y, chain);
+    CHECK(chain.size() == 2 && chain[0] == 0 && chain[1] == 2);
+    CheckInvariants(pie, 0);
+
+    // Deeper levels sit nearer the centre, where a ring is shorter: their thin slices fold sooner.
+    sm::Folder deep;
+    sm::Folder& sub = AddFolder(deep, L"sub");
+    AddFile(sub, L"big", 980);
+    AddFile(sub, L"small-a", 10);
+    AddFile(sub, L"small-b", 10);
+    Finish(deep);
+    options.minArc = 20.0;  // the small files: about 25 pixels in ring 1 of the normal pie, 7 inverted
+    pie.Build(&deep, 0, 1001, 1001, options);
+    sm::PieOptions outward = options;
+    outward.inverted = false;
+    normal.Build(&deep, 0, 1001, 1001, outward);
+    CHECK_EQ(normal.Items().size(), std::size_t{ 4 });
+    CHECK_EQ(pie.Items().size(), std::size_t{ 3 });
+    CHECK(pie.Items().size() == 3 && pie.Items()[2].IsFolded() && pie.Items()[2].folded == 2);
+    CheckInvariants(pie, 0);
 }
 
 TEST_CASE(PieUsesOnlyTheRingsTheTreeNeeds)

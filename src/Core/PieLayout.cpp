@@ -35,7 +35,10 @@ namespace sm
         total_ = 0;
         rings_ = 0;
         radius_ = 0.0;
-        hubRadius_ = 0.0;
+        hubInner_ = 0.0;
+        hubOuter_ = 0.0;
+        ringsInner_ = 0.0;
+        ringsOuter_ = 0.0;
         ringWidth_ = 0.0;
     }
 
@@ -52,12 +55,26 @@ namespace sm
             return;
         }
         radius_ = radius;
-        hubRadius_ = radius * std::clamp(options_.hubFraction, 0.05, 0.9);
+        if (options_.inverted)
+        {
+            // The folder as a rim; its rings fill everything inside it.
+            hubInner_ = radius * (1.0 - std::clamp(options_.rimFraction, 0.02, 0.5));
+            hubOuter_ = radius;
+            ringsInner_ = 0.0;
+            ringsOuter_ = hubInner_;
+        }
+        else
+        {
+            hubInner_ = 0.0;
+            hubOuter_ = radius * std::clamp(options_.hubFraction, 0.05, 0.9);
+            ringsInner_ = hubOuter_;
+            ringsOuter_ = radius;
+        }
 
         total_ = TotalOf(*folder);
         if (total_ == 0)
         {
-            return;  // an empty folder: just the hub
+            return;  // an empty folder: just the hub (or rim)
         }
 
         // Only as many rings as there is something to show in, so a folder of
@@ -69,7 +86,7 @@ namespace sm
         items_.reserve(256);
         for (;;)
         {
-            ringWidth_ = (radius_ - hubRadius_) / rings_;
+            ringWidth_ = (ringsOuter_ - ringsInner_) / rings_;
             items_.clear();
             LayoutFolder(folder, depth, 0, 0.0, kTwoPi, total_);
             int used = 0;
@@ -226,8 +243,22 @@ namespace sm
     PiePoint PieLayout::Centroid(PieSlice const& slice) const noexcept
     {
         double const angle = slice.start + slice.sweep / 2.0;
-        double const radius = InnerRadius(slice.ring) + ringWidth_ / 2.0;
+        double const inner = InnerRadius(slice.ring);
+        double radius = inner + ringWidth_ / 2.0;
+        if (inner <= 0.0)
+        {
+            // A slice that comes to a point in the centre is wider further out;
+            // one that goes all the way round is a disc, centred on the centre.
+            radius = slice.sweep >= kTwoPi - 1e-9 ? 0.0 : 0.6 * ringWidth_;
+        }
         return { centerX_ + radius * std::sin(angle), centerY_ - radius * std::cos(angle) };
+    }
+
+    // The ring at `radius` pixels from the centre (within RingsInner() .. RingsOuter()).
+    int PieLayout::RingAt(double radius) const noexcept
+    {
+        double const across = options_.inverted ? ringsOuter_ - radius : radius - ringsInner_;  // from ring 0's edge
+        return std::clamp(static_cast<int>(across / ringWidth_), 0, rings_ - 1);
     }
 
     void PieLayout::ToPolar(double x, double y, double& radius, double& angle) const noexcept
@@ -247,7 +278,7 @@ namespace sm
         double radius = 0.0;
         double angle = 0.0;
         ToPolar(x, y, radius, angle);
-        return radius_ > 0.0 && radius < hubRadius_;
+        return radius_ > 0.0 && radius >= hubInner_ && radius < hubOuter_;
     }
 
     int PieLayout::HitTest(double x, double y) const noexcept
@@ -255,11 +286,11 @@ namespace sm
         double radius = 0.0;
         double angle = 0.0;
         ToPolar(x, y, radius, angle);
-        if (items_.empty() || radius < hubRadius_ || radius >= radius_)
+        if (items_.empty() || radius < ringsInner_ || radius >= ringsOuter_)
         {
-            return -1;
+            return -1;  // the hub (or rim), or outside the pie
         }
-        int const ring = std::min(rings_ - 1, static_cast<int>((radius - hubRadius_) / ringWidth_));
+        int const ring = RingAt(radius);
         std::size_t i = 0;
         while (i < items_.size())
         {
@@ -273,9 +304,9 @@ namespace sm
             {
                 return static_cast<int>(i);
             }
-            ++i;  // the point is further out: look among the slice's contents
+            ++i;  // the point is a ring deeper: look among the slice's contents
         }
-        return -1;  // beyond a file, or beyond the last ring a folder's contents reach
+        return -1;  // past a file, or past the last ring a folder's contents reach
     }
 
     void PieLayout::ContainersAt(double x, double y, std::vector<int>& result) const

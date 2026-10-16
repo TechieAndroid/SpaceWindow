@@ -29,6 +29,7 @@ zoom in, and clean up straight from the map.
 - [Based on SpaceMonger by Sean Werkema](#based-on-spacemonger-by-sean-werkema)
 - [Download](#download)
 - [Using SpaceWindow](#using-spacewindow)
+  - [Background animations](#background-animations)
   - [Themes](#themes)
 - [What changed from SpaceMonger 1.4.0](#what-changed-from-spacemonger-140)
 - [Building from source](#building-from-source)
@@ -119,22 +120,23 @@ info tip of its other names says so.
 
 | Keyboard | |
 |---|---|
-| Ctrl+O | Open a drive or folder |
-| Ctrl+P | Switch between the treemap and the pie chart |
-| F5 | Reload: read again what changed (the view stays zoomed where it was) |
-| Shift+F5 | Full Rescan: scan everything again |
-| Arrow keys | Move the selection to the neighbouring box or slice |
+| ← / ↑ / → / ↓ | Move the selection to the nearest box or slice in that direction |
 | Enter | Zoom into the selected folder, or run/open the selected file |
-| Alt+↑ or Backspace | Up one level (Zoom Out); the folder you came out of is selected |
+| Alt+↑ / Backspace | Up one level (Zoom Out); the folder you came out of is selected |
 | Alt+↓ | Down one level: towards the selection, or else back down the way you came up |
 | Alt+← | Back to the previous view |
 | Alt+→ | Forward again, to the view you went back from |
 | Home | All the way out (Zoom Full) |
-| Delete | Move the selection to the Recycle Bin (asks first) |
+| Esc | Clear the selection |
+| Ctrl+O | Open a drive or folder |
+| F5 | Reload: read again what changed (the view stays zoomed where it was) |
+| Shift+F5 | Full Rescan: scan everything again |
+| Ctrl+P | Switch between the treemap and the pie chart |
+| Ctrl+Shift+P | Switch between the treemap and the inverted pie chart |
+| Del | Move the selection to the Recycle Bin (asks first) |
 | Alt+Enter | Properties |
 | Ctrl+Shift+C | Copy the selected path |
-| Menu key | Context menu for the selection |
-| Esc | Clear the selection |
+| Menu | Context menu for the selection (the Menu key) |
 | F1 | About |
 | Alt | Show the access keys of the toolbar and menus |
 
@@ -173,9 +175,47 @@ depth), so each ring is one level deeper.
   them, as in the treemap.
 - Selecting, zooming (double-click a folder; double-click the hub to go back
   up), the arrow keys, the context menu, delete and the rollover boxes work
-  the same in both views, and the selection is kept when you switch.
+  the same in all three views, and the selection is kept when you switch.
 
 ![The pie chart view](docs/screenshots/pie-chart.png)
+
+### Inverted pie chart
+
+**Inverted Pie** on the toolbar (or Ctrl+Shift+P, or the context menu) turns
+the pie chart inside out, so the rings travel inward: the current folder is
+the outermost ring, left open to the background with just its name and size
+at the top (double-click it to go back up); its contents are the ring inside
+it, and each level deeper is one ring further in, until the slices meet in the
+centre. The biggest folders get
+the most room; deeper levels get less, so more of their small entries are
+grouped. Everything else works as in the pie chart.
+
+![The inverted pie chart, with the Y2K tunnel behind it](docs/screenshots/inverted-pie.png)
+
+### Background animations
+
+**Setup → Background animation** plays an animation in the space the map
+leaves free: around the pie charts, through the gaps between their slices, and
+behind the welcome screen (the treemap fills the whole window, so it has none).
+An animation shows as soon as you pick it, and **Cancel** goes back.
+
+| Animation | |
+|---|---|
+| DOOM Fire | The PSX DOOM fire, as [kiedtl/fire](https://github.com/kiedtl/fire) and the [ly](https://github.com/fairyglade/ly) display manager play it in a terminal |
+| Matrix | Characters raining down the window in columns, as in CMatrix and ly |
+| Colour Mix | ly's slowly swirling bands of red, blue and black |
+| Game of Life | Conway's Game of Life, with new life sprinkled in now and then (as ly does) so that it never settles |
+| Y2K Tunnel | An endless, curving neon tube, flown through like a year-2000 screen saver |
+
+| | |
+|---|---|
+| ![DOOM Fire](docs/screenshots/fire.jpg) | ![Matrix](docs/screenshots/matrix.jpg) |
+| ![Colour Mix](docs/screenshots/colormix.jpg) | ![Game of Life](docs/screenshots/life.jpg) |
+
+The animations are off until you pick one. They pause while the window is
+minimized, hold still while battery saver is on and once the window has been
+in the background for a minute, stay off when Windows' animation effects are
+turned off, and take about 5-12% of one processor core.
 
 ### Settings
 
@@ -183,8 +223,9 @@ depth), so each ring is one level deeper.
 French), label density, horizontal/vertical bias, 12 colour schemes for files
 and folders, tip delays and contents, rollover boxes, animated zoom, rescan
 after delete, disabling Delete, and remembering the window position - plus a
-[theme](#themes) and the list of keyboard shortcuts. The first time SpaceWindow starts, it imports the settings
-of SpaceMonger 1.x if it finds them, and leaves them untouched.
+[theme](#themes), a [background animation](#background-animations) and
+the list of keyboard shortcuts. The first time SpaceWindow starts, it imports
+the settings of SpaceMonger 1.x if it finds them, and leaves them untouched.
 
 | | |
 |---|---|
@@ -282,16 +323,20 @@ which makes them complete examples.
 | User interface | MFC and GDI | WinUI 3 (Windows App SDK 2.5) with Mica and Fluent design |
 | Drawing | 9-pixel bitmap fonts, stretched on high-DPI screens | Direct2D and DirectWrite at the screen's real resolution |
 | Scanning | One thread, recursive, pumping window messages | Parallel, batched directory reads on a worker pool, with a live map; as administrator, whole NTFS drives from the master file table. Reloads read only what changed |
-| Views | Treemap | Treemap and pie chart |
+| Views | Treemap | Treemap, pie chart and inverted pie chart |
 | Themes | Windows' colours | Light and dark, Dracula, Alucard and your own theme files |
 | Paths | Up to 260 characters | Unicode, any length |
 | Sizes | Up to "4096.0 Gb", from file lengths | Up to PB, real space on disk |
 | Keyboard | Mouse only | Full keyboard navigation and shortcuts |
-| Tests | None | 79 unit tests and 4 drive tests, AddressSanitizer, static analysis |
+| Tests | None | 98 unit tests, 4 drive tests and a UI smoke test, AddressSanitizer, static analysis, a formatting check |
 
 ### New features
 
-- **Pie chart view** of the same map ([details](#pie-chart-view)).
+- **Pie chart view** of the same map ([details](#pie-chart-view)), and an
+  [inverted one](#inverted-pie-chart) whose rings travel inward.
+- **Background animations** around the pie charts: DOOM fire, Matrix rain,
+  ly's colour mix, Game of Life and an endless Y2K tunnel
+  ([details](#background-animations)).
 - **Themes** for the whole app, map included: the Windows look, Dracula,
   Alucard, or your own theme files, previewed live ([details](#themes)).
 - **Windows 11 design:** Mica backdrop, content in the title bar, a command
@@ -305,8 +350,8 @@ which makes them complete examples.
 - **Responsive:** scanning never blocks the window, draws the map as it goes
   and can be cancelled at once - even on a network share that stopped
   answering.
-- **Quick scans:** a whole 1 TB drive in 3.4 s as administrator (read straight
-  from its NTFS master file table) and 4.7 s as a standard user, where
+- **Quick scans:** a whole 1 TB drive in 2.5 s as administrator (read straight
+  from its NTFS master file table) and 4.8 s as a standard user, where
   SpaceMonger 1.4.0 takes over 30 s ([details](#performance)).
 - **Instant reloads:** **Reload** reads again only what changed - the files
   the drive's change journal names, or the folders SpaceWindow saw change -
@@ -382,7 +427,7 @@ Commands and settings:
 ### Performance
 
 **Against SpaceMonger 1.4.0 itself:** both programs scanning the whole of a
-1 TB system drive (NVMe; 1.93 million files and 351,000 folders) on a
+1 TB system drive (NVMe; 1.94 million files and 353,000 folders) on a
 16-thread PC (AMD Ryzen 9 6900HS) with a warm file-system cache; the median of
 three runs after a warm-up run. SpaceMonger is timed from *OK* in its drive
 dialog (or *Reload*) until the map appears, SpaceWindow from the moment it
@@ -390,55 +435,70 @@ starts (so its start-up counts against it):
 
 | | SpaceMonger 1.4.0 | SpaceWindow | Speed-up |
 |---|---:|---:|---:|
-| As administrator (SpaceWindow reads the master file table) | 32.2 s | 3.4 s | **9.4×** |
-| As a standard user (both list the folders) | 31.0 s | 4.7 s | **6.5×** |
-| Peak memory use | 254–264 MB | 524–667 MB | |
+| As administrator (SpaceWindow reads the master file table) | 32.2 s | 2.5 s | **13×** |
+| As a standard user (both list the folders) | 31.0 s | 4.8 s | **6.5×** |
+| Peak memory use | 254–264 MB | 509–606 MB | |
 
 SpaceMonger keeps one processor busy for the whole scan (about 32 s of
-processor time). SpaceWindow spreads a standard user's scan over 16 threads
-(about 47 s of processor time in 4.7 s); as administrator it needs only about
-2 s of processor time, as reading the master file table mostly waits for the
-disk. It uses about twice the memory: it is a 64-bit program, keeps more about
-each file (its size on disk, and the IDs that hard links and reloads need),
-and draws with WinUI and Direct3D. The two do not see quite the same files:
-Windows shows SpaceMonger, a 32-bit program, `SysWOW64` in place of
-`System32`, and SpaceMonger counts a hard-linked file once per name and skips
-paths longer than 260 characters.
+processor time). SpaceWindow spreads a standard user's scan over 12 threads
+(about 46 s of processor time in 4.8 s), and leaves a quarter of the
+processors free; as administrator it needs only about 2.5 s of processor
+time, as reading the master file table mostly waits for the disk. It uses
+about twice the memory: it is a 64-bit program, keeps more about each file
+(its size on disk, and the IDs that hard links and reloads need), and draws
+with WinUI and Direct3D. The two do not see quite the same files: Windows
+shows SpaceMonger, a 32-bit program, `SysWOW64` in place of `System32`, and
+SpaceMonger counts a hard-linked file once per name and skips paths longer
+than 260 characters.
 
 **The scanners alone** (`CoreTests.exe --bench`), on the same PC. Scanning
-`C:\Windows` (170,740 files and 42,823 folders; both scanners count exactly
-the same), best of three runs with a warm file-system cache:
+`C:\Windows` (162,391 files and 46,642 folders; both scanners count
+exactly the same), fastest of three runs with a warm file-system cache:
 
 | Scanner | Time | Speed-up |
 |---|---:|---:|
-| SpaceMonger 1.4.0 algorithm (recursive `FindFirstFile`, one thread) | 7,638 ms | 1.0× |
-| SpaceWindow, one thread | 4,777 ms | 1.6× |
-| SpaceWindow, 16 threads | 888 ms | **8.6×** |
+| SpaceMonger 1.4.0 algorithm (recursive `FindFirstFile`, one thread) | 4,753 ms | 1.0× |
+| SpaceWindow, one thread | 3,066 ms | 1.6× |
+| SpaceWindow, 12 threads | 445 ms | **10.7×** |
 
 The whole system drive (`CoreTests.exe --bench C:\`, run as administrator;
 times vary by a few hundred milliseconds from run to run):
 
-| | Time | Speed-up |
-|---|---:|---:|
-| SpaceWindow, 16 threads, listing folders | 4,500–5,100 ms | 1.0× |
-| SpaceWindow, reading the master file table | about 3,500 ms | 1.3–1.5× |
-| **Reload** after a file was added or deleted (in the app) | about 150 ms | about 30× |
+| | Time | Processor time | Speed-up |
+|---|---:|---:|---:|
+| SpaceWindow, 12 threads, listing folders | 4,173 ms | 42,734 ms | 1.0× |
+| SpaceWindow, reading the master file table | 2,249 ms | 1,938 ms | 1.9× |
+| ... of which the disk takes to deliver the table | 1,879 ms | | |
+| **Reload** from the change journal | 116 ms | | |
+| **Reload** of watched folders (the drive's top folder listed again) | 46 ms | | |
+
+A reload from the journal reads, off the window's thread, the records of the
+files the journal names and of the large ones, in case one grew while held
+open (4,092 records here); putting the changes into the tree takes 1.8 ms
+on the window's thread. A reload of watched folders lists them again off the
+window's thread too, and puts them in place in 46 ms on it.
 
 Where the speed comes from:
 
 - As administrator, a whole NTFS drive is read straight from its master file
   table (MFT), the table where NTFS keeps every file's names, sizes and
-  attributes: in 4 MB blocks with six reads in flight, decoded while the next
-  ones arrive, without opening a single folder. It then takes about as long
-  as the disk takes to read the table: 2.8 million records of 1 KB here.
+  attributes: in 4 MB blocks with six reads in flight, decoded on four
+  processors while the next ones arrive, without opening a single folder. The
+  tree is then put together on four processors too, each folder's entries
+  copied once at their final size and each hard-linked file counted once on
+  the way, so the whole scan takes little longer than the disk takes to
+  deliver the table: 2.8 million records of 1 KB here.
 - The drive's change journal lists every file changed since a scan, so
-  **Reload** reads just those files and patches the folders they are in. When
-  the journal cannot tell (it was reset, or has dropped what happened since)
-  or too much changed, Reload scans the drive again.
+  **Reload** reads just those files and patches the folders they are in. The
+  tree keeps an index of its folders and its large files from one reload to
+  the next, so a reload's work grows with what changed, not with the drive.
+  When the journal cannot tell (it was reset, or has dropped what happened
+  since) or too much changed, Reload scans the drive again.
 - Anywhere else - a folder, a drive scanned without administrator rights, a
   network share - the scanned folder is watched from the moment its scan
   starts (`ReadDirectoryChangesW`), and **Reload** lists again only the folders
-  that changed: about 30 ms for a folder of a few hundred megabytes here.
+  that changed, and counts again only the hard links of the files whose names
+  came or went: about 30 ms for a folder of a few hundred megabytes here.
 - A file kept open and written to (a download, a virtual machine's disk) shows
   in a folder listing as it was when last closed, and the change journal names
   it only once until it is closed. So Reload also reads the largest files, and
@@ -447,9 +507,11 @@ Where the speed comes from:
   entries per system call and reports each file's allocation and reparse tag,
   so no file has to be opened (but those compressed by Windows itself, whose
   real size listings hide).
-- A pool of worker threads shares a queue of folders: one per processor (up
-  to 16) on SSDs, more on network shares to hide latency, and only two on
-  spinning disks, where parallel reads would make the heads seek.
+- A pool of worker threads shares a queue of folders: three for every four
+  processors (up to 16) on SSDs - twelve list this drive as fast as sixteen,
+  with less processor time and room to spare for the window - more on network
+  shares to hide latency, and only two on spinning disks, where parallel reads
+  would make the heads seek.
 - Each folder is totalled and sorted by the thread that finishes its last
   sub-folder, so no second pass over the tree is needed; names are stored in
   one string per folder rather than one allocation per file.
@@ -466,18 +528,26 @@ Where the speed comes from:
   as errors and SDL checks.
 - **Separation:** everything that doesn't need the user interface (scanner,
   layouts, settings, text, colours) is a library with unit tests.
-- **Checked:** 79 unit tests (formatting, languages and their shortcut lists,
-  colours, themes and theme files, treemap and pie chart layouts, Back,
-  Forward and the way back down, the scanner with junctions,
+- **Checked:** 98 unit tests (formatting, languages, the keyboard shortcuts
+  and the README's list of them, colours, themes and theme files, treemap and
+  pie chart layouts (the pie inverted too), fitting names into boxes and
+  slices, the background animations, Back, Forward and the way back down,
+  the folder tree's totals, walks and hard links, the scanner with junctions,
   Unicode, very long paths and 150-level trees, NTFS file records, run lists
-  and change journal patches, hard links, reloads of watched folders and
-  rescans of one folder, live maps of a scan, unreadable folders, stopping a
-  scan blocked in I/O, settings and the 1.x import) pass in Release, Debug and
+  and change journal patches (and the index they keep), reloads of watched
+  folders (hard links and unreadable folders too) and rescans of one folder,
+  live maps of a scan, unreadable folders, stopping a scan blocked in I/O,
+  parallel loops, settings and the 1.x import) pass in Release, Debug and
   AddressSanitizer builds; MSVC code analysis and clang-tidy report no
-  findings. Four drive tests (`CoreTests.exe --volume`, as administrator) read
-  the whole master file table, check that a scan from it, and a reload after
-  files and folders were added, moved, renamed and deleted, match the folder
-  scanner file for file, and that reloads see files growing while held open.
+  findings, and every source file is formatted as `.clang-format` says. Four
+  drive tests (`CoreTests.exe --volume`, as administrator) read the whole
+  master file table, check that a scan from it, and a reload after files and
+  folders were added, moved, renamed and deleted, match the folder scanner
+  file for file, and that reloads see files growing while held open. A smoke
+  test of the app itself (`tests\Ui\Smoke.ps1`) starts it, scans a folder,
+  draws each view, opens Setup and About and plays a background animation -
+  through UI Automation and window captures, without a single key press or
+  mouse click, so it can run while you use the PC.
 - **Read-only:** a drive opened for reading its master file table is only
   ever read; SpaceWindow never writes to it, and never creates a change
   journal where there is none.
@@ -492,9 +562,9 @@ Where the speed comes from:
 | `FolderView.cpp/.h` (layout) | `src/Core/TreemapLayout.*`: the same algorithm, 32-bit and allocation-free |
 | `FolderView.cpp/.h` (drawing), `xapp.h` | `src/App/MapRenderer.*`: Direct2D and DirectWrite |
 | `FolderView.cpp` (colours, text) | `src/Core/Palette.*`, `src/Core/Format.*` |
-| `TipWnd.cpp/.h` | Name and info tips in `src/App/MainWindow.xaml` |
-| `Mainfrm.cpp/.h`, `SpaceMonger.cpp/.h`, `Freedoc.cpp`, `Freeview.cpp` | `src/App/App.xaml.*`, `src/App/MainWindow.xaml.*` |
-| `DriveDialog.cpp`, `SetupDlg.cpp`, `AboutDialog.cpp` | Dialogs in `src/App/MainWindow.xaml`, `src/App/ShellOps.*` |
+| `TipWnd.cpp/.h` | Name and info tips in `src/App/MainWindow.xaml`, `src/App/MainWindowTips.cpp` |
+| `Mainfrm.cpp/.h`, `SpaceMonger.cpp/.h`, `Freedoc.cpp`, `Freeview.cpp` | `src/App/App.xaml.*`; the window in `src/App/MainWindow.xaml.*` and, by topic, `MainWindowCommands.cpp`, `MainWindowMap.cpp`, `MainWindowScanning.cpp` |
+| `DriveDialog.cpp`, `SetupDlg.cpp`, `AboutDialog.cpp` | Dialogs in `src/App/MainWindow.xaml`, `src/App/MainWindowDialogs.cpp`, `src/App/ShellOps.*` |
 | `lang.h`, `lang_en.cpp`, `lang_fr.cpp` | `src/Core/Lang.*` (plus English UK) |
 | `CCurrentSettings` | `src/Core/Settings.*` |
 | `SpaceMonger.rc`, `res\` | `src/App/MainWindow.xaml`, `src/App/SpaceWindow.rc`, `src/App/Assets/` |
@@ -504,6 +574,10 @@ Where the speed comes from:
 | (new) | `src/Core/FolderWatch.*`: which folders changed since a scan, for reloads; `src/Core/IoCancellation.*`: stopping a scan blocked on a network share |
 | (new) | `src/Core/Theme.*`: themes and theme files; `src/App/ChromeTheme.*`: theme colours for the WinUI controls |
 | (new) | `src/Core/ViewHistory.*`: Back, Forward and the way back down (Alt+arrows) |
+| (new) | `src/Core/Backdrop.*`, `src/App/MapRendererBackdrop.cpp`: the background animations |
+| (new) | `src/Core/Commands.*`: the commands and the keys that run them - one table for the window's shortcuts, the map's keys, the toolbar and Setup's list |
+| (new) | `src/Core/LabelFit.*`: the rules for fitting names into boxes and slices (the renderer measures and draws) |
+| (new) | `src/Core/Parallel.*`: decoding the master file table and building its tree on several processors |
 
 ## Building from source
 
@@ -537,7 +611,7 @@ cd SpaceWindow
 | Command | Does |
 |---|---|
 | `.\build.ps1` | Restore, build Release x64, run the unit tests, package |
-| `.\build.ps1 -All` | ... plus MSVC code analysis, clang-tidy and the AddressSanitizer test run |
+| `.\build.ps1 -All` | ... plus MSVC code analysis, clang-tidy, the formatting check (`.clang-format`) and the AddressSanitizer test run |
 | `.\build.ps1 -Platform ARM64` | Cross-compile for Windows on Arm |
 | `.\build.ps1 -Configuration Debug -NoPublish` | Debug build, no package |
 
@@ -559,8 +633,11 @@ more uses (reading the master file table needs administrator rights):
 |---|---|
 | (no arguments) | The unit tests |
 | `--volume` | ... plus the drive tests, on the drive of the temporary folder |
-| `--bench <folder or drive>` | Times the scanners |
+| `--bench <folder or drive> [threads...]` | Times the scanners - the folder scanner on that many threads too - and reloads |
 | `--compare <folder>` | Compares the master file table's view of a folder with the folder scanner's, file by file |
+
+`tests\Ui\Smoke.ps1` tests the app itself, the Release x64 build by default
+(`-Exe` for another): it puts its settings back when done.
 
 Themes recolour the WinUI controls through every name the controls know their
 brushes by; `src/App/ChromeThemeKeys.h` lists them, generated from the Windows
@@ -576,7 +653,9 @@ build/SpaceWindow.Cpp.props       compiler and linker settings shared by all pro
 src/Core/                         static library: scanner, layouts, settings, text, colours
 src/App/                          the WinUI 3 app
 tests/CoreTests/                  unit tests, drive tests, the scanner benchmark and comparison
-tools/                            clang-tidy runner, UI test helpers, icon and theme-key generators
+tests/Ui/                         a smoke test of the app, without keyboard or mouse input
+tools/                            clang-tidy runner, window capture, icon and theme-key generators
+.clang-format                     how the code is formatted (checked by build.ps1 -Analyze)
 docs/screenshots/                 the pictures in this README
 ```
 
@@ -589,7 +668,8 @@ license notice ([LICENSE.txt](LICENSE.txt)) with your copies.
 
 Bug reports, ideas and pull requests are welcome. Before sending a pull
 request, please run `.\build.ps1 -All` (it builds, tests and runs the
-analysis and sanitizer checks) and keep it free of warnings.
+analysis, formatting and sanitizer checks) and `tests\Ui\Smoke.ps1`, and
+keep them free of warnings.
 
 ## Support this project
 

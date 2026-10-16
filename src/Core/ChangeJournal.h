@@ -31,16 +31,16 @@ namespace sm
     struct ChangedFile
     {
         std::uint32_t record = 0;
-        bool exists = false;     // in use, and one of the volume's files (not the file system's own)
+        bool exists = false;  // in use, and one of the volume's files (not the file system's own)
         bool directory = false;
-        bool alias = false;      // a junction or symbolic link, which the tree leaves out
+        bool alias = false;  // a junction or symbolic link, which the tree leaves out
         std::uint32_t attributes = 0;
         std::uint64_t lastWriteTime = 0;
-        std::uint64_t size = 0;      // bytes on disk
-        std::uint64_t length = 0;    // bytes of data
+        std::uint64_t size = 0;                                     // bytes on disk
+        std::uint64_t length = 0;                                   // bytes of data
         std::vector<std::pair<std::uint32_t, std::wstring>> names;  // folder record, name (one per hard link)
         std::vector<std::uint32_t> formerFolders;  // folders the journal saw it in, where it may still be listed
-        bool recheck = false;  // read again without the journal naming it, in case it grew unseen
+        bool recheck = false;                      // read again without the journal naming it, in case it grew unseen
     };
 
     struct JournalChanges
@@ -80,9 +80,16 @@ namespace sm
     // (JournalPosition::openFiles); files already open before the tree was
     // read cannot be told apart, so the large ones - what such files grow
     // into, and what shows on the map - are worth reading again on each rescan.
-    std::vector<std::uint32_t> LargeFiles(Folder const& root, std::uint64_t threshold = std::uint64_t{ 16 } << 20);
+    inline constexpr std::uint64_t kLargeFile = std::uint64_t{ 16 } << 20;
+
+    // The records of the tree's files of kLargeFile or more, sorted.  From
+    // the tree's JournalIndex, which is built here if it has none: call it
+    // while nothing changes the tree.
+    std::vector<std::uint32_t> LargeFiles(FolderTree& tree);
 
     // Applies changes to a tree read from the same volume, and moves the
-    // tree's journal position on.  Quick: call it on the thread that owns the tree.
+    // tree's journal position on.  Keeps the tree's JournalIndex up to date
+    // (building it first if need be), so the next reload starts without
+    // walking the tree.  Quick: call it on the thread that owns the tree.
     void ApplyJournalChanges(FolderTree& tree, JournalChanges const& changes);
 }

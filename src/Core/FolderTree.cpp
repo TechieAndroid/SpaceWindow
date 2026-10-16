@@ -9,6 +9,7 @@
 #include "FolderWatch.h"
 #include "IoCancellation.h"
 #include "Ntfs.h"
+#include "Text.h"
 
 namespace sm
 {
@@ -44,21 +45,12 @@ namespace sm
             return name == L"." || name == L"..";
         }
 
-        // Junctions, directory and file symbolic links, and volume mount points
-        // are "name surrogates": aliases for data that lives somewhere else.
-        // Following them would count that data twice and can loop forever, so
-        // they are skipped, as in 1.4.0.  Other reparse points (OneDrive
-        // placeholders, deduplicated or WOF-compressed files, app execution
-        // aliases) hold real data and are measured normally.
-        constexpr bool IsAlias(std::uint32_t attributes, std::uint32_t reparseTag) noexcept
-        {
-            // IsReparseTagNameSurrogate(tag), without the macro's C-style cast.
-            constexpr std::uint32_t kNameSurrogate = 0x20000000;
-            return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 && (reparseTag & kNameSurrogate) != 0;
-        }
+        // IsAlias (FolderTree.h) tests what the SDK's IsReparseTagNameSurrogate does, without its C-style cast.
         static_assert(IsReparseTagNameSurrogate(IO_REPARSE_TAG_MOUNT_POINT) &&
+                      IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_MOUNT_POINT) &&
                       IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_SYMLINK) &&
                       !IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_CLOUD_6) &&
+                      !IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_WOF) &&
                       !IsAlias(0, IO_REPARSE_TAG_MOUNT_POINT));
 
         // Windows' own file compression (compact.exe, CompactOS) moves a file's
@@ -74,8 +66,10 @@ namespace sm
                                                  FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS;
             return allocated < logical && (attributes & kExplained) == 0;
         }
-        static_assert(HidesItsSize(FILE_ATTRIBUTE_ARCHIVE, 0, 50000) && !HidesItsSize(FILE_ATTRIBUTE_ARCHIVE, 53248, 50000) &&
-                      !HidesItsSize(FILE_ATTRIBUTE_SPARSE_FILE, 0, 50000) && !HidesItsSize(FILE_ATTRIBUTE_NORMAL, 0, 0));
+        static_assert(HidesItsSize(FILE_ATTRIBUTE_ARCHIVE, 0, 50000) &&
+                      !HidesItsSize(FILE_ATTRIBUTE_ARCHIVE, 53248, 50000) &&
+                      !HidesItsSize(FILE_ATTRIBUTE_SPARSE_FILE, 0, 50000) &&
+                      !HidesItsSize(FILE_ATTRIBUTE_NORMAL, 0, 0));
 
         // The space a file's data takes, as the file itself reports it.
         std::optional<std::uint64_t> CompressedSize(std::wstring const& path)
@@ -89,12 +83,10 @@ namespace sm
             return (std::uint64_t{ high } << 32) | low;
         }
 
-        // A record number as entries keep it: the low 48 bits of an NTFS file
-        // reference, or 0 when it does not fit.
-        constexpr std::uint32_t Record32(std::uint64_t fileReference) noexcept
+        // A record number as entries keep it, from an NTFS file reference; 0 when it does not fit.
+        constexpr std::uint32_t RecordOfReference(std::uint64_t fileReference) noexcept
         {
-            std::uint64_t const record = fileReference & 0x0000'FFFF'FFFF'FFFFull;
-            return record <= UINT32_MAX ? static_cast<std::uint32_t>(record) : 0;
+            return ntfs::Record32(ntfs::RecordOf(fileReference)).value_or(0);
         }
 
         // One entry of a folder listing, from either kind of listing record.
@@ -114,8 +106,13 @@ namespace sm
         {
             // For a reparse point, EaSize holds the reparse tag ([MS-FSCC] 2.4.17).
             return { { info.FileName, info.FileNameLength / sizeof(wchar_t) },
-                     info.FileAttributes, info.EaSize, ToUInt64(info.AllocationSize), ToUInt64(info.EndOfFile),
-                     ToUInt64(info.LastWriteTime), 0, info.NextEntryOffset };
+                     info.FileAttributes,
+                     info.EaSize,
+                     ToUInt64(info.AllocationSize),
+                     ToUInt64(info.EndOfFile),
+                     ToUInt64(info.LastWriteTime),
+                     0,
+                     info.NextEntryOffset };
         }
 
         Listed Describe(FILE_ID_EXTD_DIR_INFO const& info) noexcept
@@ -124,8 +121,13 @@ namespace sm
             std::uint64_t reference = 0;
             std::memcpy(&reference, info.FileId.Identifier, sizeof(reference));
             return { { info.FileName, info.FileNameLength / sizeof(wchar_t) },
-                     info.FileAttributes, info.ReparsePointTag, ToUInt64(info.AllocationSize), ToUInt64(info.EndOfFile),
-                     ToUInt64(info.LastWriteTime), Record32(reference), info.NextEntryOffset };
+                     info.FileAttributes,
+                     info.ReparsePointTag,
+                     ToUInt64(info.AllocationSize),
+                     ToUInt64(info.EndOfFile),
+                     ToUInt64(info.LastWriteTime),
+                     RecordOfReference(reference),
+                     info.NextEntryOffset };
         }
 
         // A folder's own record number (0 if unknown).
@@ -139,7 +141,7 @@ namespace sm
             {
                 return 0;
             }
-            return Record32((std::uint64_t{ info.nFileIndexHigh } << 32) | info.nFileIndexLow);
+            return RecordOfReference((std::uint64_t{ info.nFileIndexHigh } << 32) | info.nFileIndexLow);
         }
 
         constexpr bool IsUnsupportedInfoClass(DWORD error) noexcept
@@ -182,22 +184,24 @@ namespace sm
             return WithoutExtendedPrefix(expanded);
         }
 
-        // Totals a folder whose listing and sub-folders are all complete, then
-        // sorts it.  Runs exactly once per folder, on whichever worker finished last.
-        void Finalize(Folder& folder)
+        // What a worker lists a folder into before the folder gets it: kept
+        // from folder to folder, so that a folder's entries and names are
+        // copied once, at their final size - with millions of entries held,
+        // the slack of vectors grown entry by entry would add up.
+        struct Listing
         {
-            // Vectors grow geometrically while a folder is listed; give back the
-            // slack, which matters when millions of entries are held in memory.
-            if (folder.entries.capacity() - folder.entries.size() > 8)
+            std::vector<Entry> entries;
+            std::wstring names;
+
+            void MoveInto(Folder& folder)
             {
-                folder.entries.shrink_to_fit();
+                folder.entries.reserve(entries.size());
+                std::ranges::move(entries, std::back_inserter(folder.entries));
+                folder.names.assign(names);
+                entries.clear();
+                names.clear();
             }
-            if (folder.names.capacity() - folder.names.size() > 64)
-            {
-                folder.names.shrink_to_fit();
-            }
-            UpdateTotals(folder);
-        }
+        };
 
         // What was found below a folder so far, while it is being scanned.
         struct Found
@@ -261,19 +265,22 @@ namespace sm
             // A copy of what the scan has found below `root` so far, for a live
             // map: the folders listed - breadth first while `budget` entries
             // last, then as boxes of the size found in them.  Any thread.
+            // Each folder is copied whole, while no folder is finalized; the
+            // workers wait for one folder's copy at a time, not for all of it.
             std::unique_ptr<Folder> Snapshot(Folder const& root, std::size_t budget)
             {
-                std::unique_lock const lock(finalizing_);  // no folder is finalized meanwhile
                 if (!root.listed.load(std::memory_order_acquire))
                 {
                     return nullptr;
                 }
                 auto copy = std::make_unique<Folder>();
                 std::vector<std::pair<Folder const*, Folder*>> queue{ { &root, copy.get() } };
+                std::vector<std::pair<Folder const*, Folder*>> boxes;  // folders beyond the budget
                 std::size_t entries = 0;
                 for (std::size_t next = 0; next < queue.size(); ++next)
                 {
                     auto const [source, target] = queue[next];
+                    std::unique_lock const lock(finalizing_);  // the folder is not finalized meanwhile
                     for (Entry const& entry : source->entries)
                     {
                         Folder const* const child = entry.child.get();
@@ -297,20 +304,17 @@ namespace sm
                         }
                         added.child = std::make_unique<Folder>();
                         added.child->parent = target;
-                        if (entries < budget)
-                        {
-                            queue.emplace_back(child, added.child.get());
-                        }
-                        else
-                        {
-                            // A box of the size found in it, with nothing inside.
-                            Found const found = FoundBelow(*child);
-                            added.child->sizeFiles = found.size;
-                            added.child->logicalTotal = found.logical;
-                            added.child->fileCount = found.files;
-                            added.child->folderCount = found.folders;
-                        }
+                        (entries < budget ? queue : boxes).emplace_back(child, added.child.get());
                     }
+                }
+                for (auto const& [source, box] : boxes)
+                {
+                    // A box of the size found in it, with nothing inside.
+                    Found const found = FoundBelow(*source);
+                    box->sizeFiles = found.size;
+                    box->logicalTotal = found.logical;
+                    box->fileCount = found.files;
+                    box->folderCount = found.folders;
                 }
                 for (auto const& copied : queue | std::views::reverse)
                 {
@@ -333,13 +337,21 @@ namespace sm
                 std::uint64_t bytes = 0;
             };
 
+            // What a worker keeps from one folder to the next.
+            struct Scratch
+            {
+                std::vector<std::byte> buffer = std::vector<std::byte>(kListingBufferBytes);  // records, as listed
+                Listing listing;          // the folder's entries, until it gets them
+                std::vector<Task> found;  // its sub-folders, to be scanned
+                Counts counts;
+            };
+
             void Work() noexcept
             {
                 try
                 {
                     IoCancellation::Enlistment const enlisted(io_);
-                    std::vector<std::byte> buffer(kListingBufferBytes);
-                    std::vector<Task> found;
+                    Scratch scratch;
                     ULONGLONG nextReport = 0;
                     Task task;
                     while (Pop(task))
@@ -350,8 +362,8 @@ namespace sm
                             progress_.SetCurrentPath(WithoutExtendedPrefix(task.path));
                             nextReport = now + kPathReportIntervalMs;
                         }
-                        Scan(task, buffer, found);
-                        Retire(found);
+                        Scan(task, scratch);
+                        Retire(scratch.found);
                     }
                 }
                 catch (...)
@@ -417,54 +429,55 @@ namespace sm
                 available_.notify_all();
             }
 
-            void Scan(Task const& task, std::vector<std::byte>& buffer, std::vector<Task>& found)
+            void Scan(Task const& task, Scratch& scratch)
             {
-                Counts counts;
-                if (!ListWithHandle(task, buffer, found, counts))
+                scratch.counts = {};
+                if (!ListWithHandle(task, scratch))
                 {
-                    ListWithFindFile(task, found, counts);
+                    ListWithFindFile(task, scratch);
                 }
+                // Before the folder counts as listed: a snapshot then reads its entries.
+                scratch.listing.MoveInto(*task.folder);
                 task.folder->listed.store(true, std::memory_order_release);
-                progress_.files.fetch_add(counts.files, std::memory_order_relaxed);
-                progress_.folders.fetch_add(counts.folders, std::memory_order_relaxed);
-                progress_.bytes.fetch_add(counts.bytes, std::memory_order_relaxed);
+                progress_.files.fetch_add(scratch.counts.files, std::memory_order_relaxed);
+                progress_.folders.fetch_add(scratch.counts.folders, std::memory_order_relaxed);
+                progress_.bytes.fetch_add(scratch.counts.bytes, std::memory_order_relaxed);
                 Complete(task.folder);
             }
 
             // Retires one unit of a folder's pending work.  The thread that
-            // retires the last unit finalizes the folder and reports to its
-            // parent, and so on up the tree - iteratively, so depth never
-            // matters.  A snapshot sees a folder either still pending, or
-            // finalized whole.
+            // retires the last unit finalizes the folder - totals and sorts
+            // it - and reports to its parent, and so on up the tree:
+            // iteratively, so depth never matters.  A snapshot sees a folder
+            // either still pending, or finalized whole.
             void Complete(Folder* folder)
             {
                 std::shared_lock const lock(finalizing_);
                 while (folder != nullptr && folder->pending.fetch_sub(1, std::memory_order_acq_rel) == 1)
                 {
-                    Finalize(*folder);
+                    UpdateTotals(*folder);
                     folder = folder->parent;
                 }
             }
 
             // Lists a folder in large batches.  Returns false if the file system
             // does not support FileFullDirectoryInfo, so the caller falls back.
-            bool ListWithHandle(Task const& task, std::vector<std::byte>& buffer, std::vector<Task>& found,
-                                Counts& counts)
+            bool ListWithHandle(Task const& task, Scratch& scratch)
             {
                 if (stop_.stop_requested())
                 {
                     return true;  // stopping: not worth opening another folder, which may block
                 }
-                wil::unique_hfile const directory(CreateFileW(task.path.c_str(), FILE_LIST_DIRECTORY,
-                                                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                                              nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS,
-                                                              nullptr));
+                wil::unique_hfile const directory(CreateFileW(
+                    task.path.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr));
                 if (!directory)
                 {
                     MarkUnreadable(*task.folder);
                     return true;
                 }
 
+                std::vector<std::byte>& buffer = scratch.buffer;
                 bool const ids = fileIds_.load(std::memory_order_relaxed);
                 bool restart = true;
                 while (!stop_.stop_requested())
@@ -482,8 +495,9 @@ namespace sm
                             {
                                 if (ids)
                                 {
-                                    fileIds_.store(false, std::memory_order_relaxed);  // this file system lists without them
-                                    return ListWithHandle(task, buffer, found, counts);
+                                    fileIds_.store(false,
+                                                   std::memory_order_relaxed);  // this file system lists without them
+                                    return ListWithHandle(task, scratch);
                                 }
                                 return false;
                             }
@@ -505,8 +519,8 @@ namespace sm
                         {
                             allocated = CompressedSize(task.path + std::wstring(listed.name)).value_or(allocated);
                         }
-                        Add(task, listed.name, listed.attributes, listed.reparseTag, allocated, listed.logical,
-                            listed.lastWriteTime, listed.record, found, counts);
+                        Add(task, scratch, listed.name, listed.attributes, listed.reparseTag, allocated, listed.logical,
+                            listed.lastWriteTime, listed.record);
                         if (listed.next == 0)
                         {
                             break;
@@ -520,7 +534,7 @@ namespace sm
             // Fallback for file systems that only support FindFirstFile.  Those do
             // not report allocation sizes, so compressed and sparse files ask for
             // theirs and everything is rounded up to whole clusters.
-            void ListWithFindFile(Task const& task, std::vector<Task>& found, Counts& counts)
+            void ListWithFindFile(Task const& task, Scratch& scratch)
             {
                 std::wstring const pattern = task.path + L'*';
                 WIN32_FIND_DATAW data{};
@@ -543,47 +557,48 @@ namespace sm
                     {
                         allocated = CompressedSize(task.path + std::wstring(name)).value_or(allocated);
                     }
-                    Add(task, name, data.dwFileAttributes, data.dwReserved0, RoundUpToCluster(allocated, clusterSize_),
-                        logical, ToUInt64(data.ftLastWriteTime), 0, found, counts);
+                    Add(task, scratch, name, data.dwFileAttributes, data.dwReserved0,
+                        RoundUpToCluster(allocated, clusterSize_), logical, ToUInt64(data.ftLastWriteTime), 0);
                 } while (!stop_.stop_requested() && FindNextFileW(find.get(), &data));
             }
 
-            void Add(Task const& task, std::wstring_view name, std::uint32_t attributes, std::uint32_t reparseTag,
-                     std::uint64_t allocated, std::uint64_t logical, std::uint64_t lastWriteTime, std::uint32_t record,
-                     std::vector<Task>& found, Counts& counts) const
+            void Add(Task const& task, Scratch& scratch, std::wstring_view name, std::uint32_t attributes,
+                     std::uint32_t reparseTag, std::uint64_t allocated, std::uint64_t logical,
+                     std::uint64_t lastWriteTime, std::uint32_t record) const
             {
                 if (IsDotOrDotDot(name) || IsAlias(attributes, reparseTag) || name.size() > UINT16_MAX)
                 {
                     return;
                 }
 
-                Folder& folder = *task.folder;
+                Listing& listing = scratch.listing;
                 Entry entry;
                 entry.attributes = attributes;
                 entry.lastWriteTime = lastWriteTime;
                 entry.record = record;
-                entry.nameOffset = static_cast<std::uint32_t>(folder.names.size());
+                entry.nameOffset = static_cast<std::uint32_t>(listing.names.size());
                 entry.nameLength = static_cast<std::uint16_t>(name.size());
-                folder.names.append(name);
+                listing.names.append(name);
 
                 if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
                 {
                     entry.kind = EntryKind::File;
                     entry.size = allocated;
                     entry.logicalSize = logical;
-                    folder.entries.push_back(std::move(entry));
-                    ++counts.files;
-                    counts.bytes += allocated;
+                    listing.entries.push_back(std::move(entry));
+                    ++scratch.counts.files;
+                    scratch.counts.bytes += allocated;
                     return;
                 }
 
+                Folder& folder = *task.folder;
                 auto child = std::make_unique<Folder>();
                 child->parent = &folder;
                 Folder* const childFolder = child.get();
                 entry.kind = EntryKind::Folder;
                 entry.child = std::move(child);
-                folder.entries.push_back(std::move(entry));
-                ++counts.folders;
+                listing.entries.push_back(std::move(entry));
+                ++scratch.counts.folders;
                 if (shallow_)
                 {
                     return;
@@ -592,7 +607,7 @@ namespace sm
                 std::wstring path;
                 path.reserve(task.path.size() + name.size() + 1);
                 path.append(task.path).append(name).push_back(L'\\');
-                found.push_back({ childFolder, std::move(path) });
+                scratch.found.push_back({ childFolder, std::move(path) });
 
                 // The child cannot finish before Retire() publishes it, so the
                 // count is raised in time.
@@ -606,8 +621,9 @@ namespace sm
             }
 
             // What was found below a folder so far: everything, once it is
-            // finalized.  Called with finalizing blocked.
-            static Found FoundBelow(Folder const& folder)
+            // finalized.  Each folder is looked at while no folder is
+            // finalized, so the workers wait only a moment each time.
+            Found FoundBelow(Folder const& folder)
             {
                 Found found;
                 std::vector<Folder const*> pending{ &folder };
@@ -615,6 +631,7 @@ namespace sm
                 {
                     Folder const* const at = pending.back();
                     pending.pop_back();
+                    std::unique_lock const lock(finalizing_);
                     if (at->pending.load(std::memory_order_acquire) == 0)
                     {
                         found.size += at->SizeTotal();
@@ -656,16 +673,17 @@ namespace sm
 
             std::mutex mutex_;
             std::condition_variable available_;
-            std::vector<Task> queue_;        // guarded by mutex_
-            std::size_t outstanding_ = 0;    // queued + running tasks; guarded by mutex_
-            bool stopping_ = false;          // guarded by mutex_
-            std::exception_ptr error_;       // guarded by mutex_ while workers run
+            std::vector<Task> queue_;      // guarded by mutex_
+            std::size_t outstanding_ = 0;  // queued + running tasks; guarded by mutex_
+            bool stopping_ = false;        // guarded by mutex_
+            std::exception_ptr error_;     // guarded by mutex_ while workers run
         };
 
         std::optional<bool> QuerySeekPenalty(std::wstring const& volumeRoot)
         {
             wchar_t volumeName[64]{};
-            if (!GetVolumeNameForVolumeMountPointW(volumeRoot.c_str(), volumeName, static_cast<DWORD>(std::size(volumeName))))
+            if (!GetVolumeNameForVolumeMountPointW(volumeRoot.c_str(), volumeName,
+                                                   static_cast<DWORD>(std::size(volumeName))))
             {
                 return std::nullopt;
             }
@@ -678,8 +696,8 @@ namespace sm
                 device.pop_back();
             }
 
-            wil::unique_hfile const volume(CreateFileW(device.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                                                       OPEN_EXISTING, 0, nullptr));
+            wil::unique_hfile const volume(
+                CreateFileW(device.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr));
             if (!volume)
             {
                 return std::nullopt;
@@ -756,13 +774,16 @@ namespace sm
             {
                 return std::clamp(hardware * 2, 4u, 16u);  // network latency hides behind parallel requests
             }
-            return std::clamp(hardware, 2u, 16u);  // SSD/NVMe: metadata reads scale with threads
+            // SSD/NVMe: listing scales with threads, up to a point.  On a
+            // 16-thread PC, twelve list a drive as fast as sixteen do, with
+            // less processor time, and leave the window room to stay smooth.
+            return std::clamp(hardware * 3 / 4, 2u, 16u);
         }
 
         // Local NTFS drives list each entry's file ID - its record - which tells hard links apart.
         bool ListsFileIds(VolumeInfo const& volume)
         {
-            return !volume.remote && CompareStringOrdinal(volume.fileSystem.c_str(), -1, L"NTFS", -1, TRUE) == CSTR_EQUAL;
+            return !volume.remote && EqualsIgnoringCase(volume.fileSystem, L"NTFS");
         }
 
         // A set of record numbers, one bit each: records are dense.
@@ -792,6 +813,118 @@ namespace sm
         private:
             std::vector<std::uint64_t> words_;
         };
+
+        // A name of a file whose space is to be counted once, and where it is.
+        struct LinkName
+        {
+            std::uint32_t record = 0;        // the file's
+            std::size_t depth = 0;           // of the folder holding the name, below the root
+            std::uint32_t folderRecord = 0;  // that folder's own record
+            Folder* folder = nullptr;
+            std::uint32_t index = 0;
+        };
+
+        // The names of the files `wanted` picks, in the order they are counted
+        // in: by file, then nearest the root, then in the folder with the
+        // lowest record, then the lowest name.
+        template <typename Wanted>
+        std::vector<LinkName> NamesOf(FolderTree& tree, Wanted const& wanted)
+        {
+            struct Walked
+            {
+                Folder* folder = nullptr;
+                std::size_t depth = 0;
+                std::uint32_t record = 0;
+            };
+            std::vector<LinkName> names;
+            std::vector<Walked> walk{ { tree.Root(), 0, tree.rootRecord } };
+            while (!walk.empty())
+            {
+                Walked const at = walk.back();
+                walk.pop_back();
+                for (std::size_t i = 0; i < at.folder->entries.size(); ++i)
+                {
+                    Entry const& entry = at.folder->entries[i];
+                    if (entry.child)
+                    {
+                        walk.push_back({ entry.child.get(), at.depth + 1, entry.record });
+                    }
+                    else if (entry.kind == EntryKind::File && entry.record != 0 && wanted(entry))
+                    {
+                        names.push_back(
+                            { entry.record, at.depth, at.record, at.folder, static_cast<std::uint32_t>(i) });
+                    }
+                }
+            }
+            std::ranges::sort(names, [](LinkName const& a, LinkName const& b) {
+                if (a.record != b.record)
+                {
+                    return a.record < b.record;
+                }
+                if (a.depth != b.depth)
+                {
+                    return a.depth < b.depth;
+                }
+                if (a.folderRecord != b.folderRecord)
+                {
+                    return a.folderRecord < b.folderRecord;
+                }
+                return a.folder->Name(a.index) < b.folder->Name(b.index);
+            });
+            return names;
+        }
+
+        // Counts each file of `names` under its first name; its others take
+        // no space.  The folders whose entries change are added to `changed`.
+        // True if some file has several names.
+        bool CountOnce(std::span<LinkName const> names, SizeLookup const& lookup, std::vector<Folder*>& changed)
+        {
+            auto const set = [&changed](LinkName const& name, std::uint64_t size, bool elsewhere) {
+                Entry& entry = name.folder->entries[name.index];
+                if (entry.size != size || entry.countedElsewhere != elsewhere)
+                {
+                    entry.size = size;
+                    entry.countedElsewhere = elsewhere;
+                    changed.push_back(name.folder);
+                }
+            };
+            bool linked = false;
+            for (std::size_t first = 0; first < names.size();)
+            {
+                std::size_t last = first + 1;
+                while (last < names.size() && names[last].record == names[first].record)
+                {
+                    ++last;
+                }
+                std::span<LinkName const> const file = names.subspan(first, last - first);
+                first = last;
+                linked = linked || file.size() > 1;
+
+                // Its size, from a name that holds it - or from the file, when all have given it up.
+                std::optional<std::uint64_t> size;
+                for (LinkName const& name : file)
+                {
+                    if (Entry const& entry = name.folder->entries[name.index]; !entry.countedElsewhere)
+                    {
+                        size = entry.size;
+                        break;
+                    }
+                }
+                if (!size && lookup)
+                {
+                    size = lookup(*file.front().folder, file.front().index);
+                }
+                if (size)
+                {
+                    set(file.front(), *size, false);
+                    for (LinkName const& other : file.subspan(1))
+                    {
+                        set(other, 0, true);
+                    }
+                }
+            }
+            return linked;
+        }
     }
 
     Folder::~Folder()
@@ -823,6 +956,20 @@ namespace sm
             // Out of memory for the work list: whatever is left is freed by the
             // ordinary (recursive) member destructors.
         }
+    }
+
+    std::optional<std::size_t> Folder::LevelsBelow(Folder const* ancestor) const noexcept
+    {
+        constexpr std::size_t kMaxDepth = std::size_t{ 1 } << 20;  // guards against damaged links
+        std::size_t levels = 0;
+        for (Folder const* folder = this; folder != nullptr && levels < kMaxDepth; folder = folder->parent, ++levels)
+        {
+            if (folder == ancestor)
+            {
+                return levels;
+            }
+        }
+        return std::nullopt;
     }
 
     void UpdateTotals(Folder& folder)
@@ -877,7 +1024,7 @@ namespace sm
     void UpdateTotalsUpward(Folder& root, std::span<Folder* const> changed)
     {
         constexpr std::size_t kMaxDepth = std::size_t{ 1 } << 20;  // guards against damaged links
-        std::vector<std::pair<std::size_t, Folder*>> update;  // depth, folder
+        std::vector<std::pair<std::size_t, Folder*>> update;       // depth, folder
         std::unordered_set<Folder*> queued;
         std::vector<Folder*> chain;
         for (Folder* const folder : changed)  // NOLINT(misc-const-correctness): updated below, through `chain`
@@ -923,18 +1070,10 @@ namespace sm
         RecordSet linked;
         bool anyLinked = false;
         bool anyMarked = false;  // names counted elsewhere before: their file may have lost its other names
-        std::vector<Folder const*> pending{ root };
-        while (!pending.empty())
-        {
-            Folder const* const folder = pending.back();
-            pending.pop_back();
-            for (Entry const& entry : folder->entries)
+        ForEachFolder(std::as_const(*root), [&](Folder const& folder) {
+            for (Entry const& entry : folder.entries)
             {
-                if (entry.child)
-                {
-                    pending.push_back(entry.child.get());
-                }
-                else if (entry.kind == EntryKind::File && entry.record != 0)
+                if (entry.kind == EntryKind::File && entry.record != 0)
                 {
                     if (!seen.Insert(entry.record))
                     {
@@ -944,109 +1083,60 @@ namespace sm
                     anyMarked = anyMarked || entry.countedElsewhere;
                 }
             }
-        }
+        });
+        tree.hardLinks = anyLinked;
         if (!anyLinked && !anyMarked)
         {
             return;
         }
 
-        // Their names, with the depth and the record of the folder holding each.
-        struct Name
-        {
-            std::uint32_t record = 0;
-            std::size_t depth = 0;
-            std::uint32_t folderRecord = 0;
-            Folder* folder = nullptr;
-            std::uint32_t index = 0;
-        };
-        struct Walked
-        {
-            Folder* folder = nullptr;
-            std::size_t depth = 0;
-            std::uint32_t record = 0;
-        };
-        std::vector<Name> names;
-        std::vector<Walked> walk{ { root, 0, tree.rootRecord } };
-        while (!walk.empty())
-        {
-            Walked const at = walk.back();
-            walk.pop_back();
-            for (std::size_t i = 0; i < at.folder->entries.size(); ++i)
-            {
-                Entry const& entry = at.folder->entries[i];
-                if (entry.child)
-                {
-                    walk.push_back({ entry.child.get(), at.depth + 1, entry.record });
-                }
-                else if (entry.kind == EntryKind::File && entry.record != 0 &&
-                         (linked.Contains(entry.record) || entry.countedElsewhere))
-                {
-                    names.push_back({ entry.record, at.depth, at.record, at.folder, static_cast<std::uint32_t>(i) });
-                }
-            }
-        }
-        std::ranges::sort(names, [](Name const& a, Name const& b) {
-            if (a.record != b.record)
-            {
-                return a.record < b.record;
-            }
-            if (a.depth != b.depth)
-            {
-                return a.depth < b.depth;
-            }
-            if (a.folderRecord != b.folderRecord)
-            {
-                return a.folderRecord < b.folderRecord;
-            }
-            return a.folder->Name(a.index) < b.folder->Name(b.index);
-        });
-
-        // Each file counted under its first name.
+        // Their names, each file counted under its first.
+        std::vector<LinkName> const names = NamesOf(
+            tree, [&linked](Entry const& entry) { return linked.Contains(entry.record) || entry.countedElsewhere; });
         std::vector<Folder*> changed;
-        auto const set = [&changed](Name const& name, std::uint64_t size, bool elsewhere) {
-            Entry& entry = name.folder->entries[name.index];
-            if (entry.size != size || entry.countedElsewhere != elsewhere)
-            {
-                entry.size = size;
-                entry.countedElsewhere = elsewhere;
-                changed.push_back(name.folder);
-            }
-        };
-        for (std::size_t first = 0; first < names.size();)
-        {
-            std::size_t last = first + 1;
-            while (last < names.size() && names[last].record == names[first].record)
-            {
-                ++last;
-            }
-            std::span<Name const> const file(names.data() + first, last - first);
-            first = last;
+        (void)CountOnce(names, lookup, changed);
+        UpdateTotalsUpward(*root, changed);
+        tree.UpdateSpecialEntries();
+    }
 
-            // Its size, from a name that holds it - or from the file, when all have given it up.
-            std::optional<std::uint64_t> size;
-            for (Name const& name : file)
-            {
-                if (Entry const& entry = name.folder->entries[name.index]; !entry.countedElsewhere)
-                {
-                    size = entry.size;
-                    break;
-                }
-            }
-            if (!size && lookup)
-            {
-                size = lookup(*file.front().folder, file.front().index);
-            }
-            if (size)
-            {
-                set(file.front(), *size, false);
-                for (Name const& other : file.subspan(1))
-                {
-                    set(other, 0, true);
-                }
-            }
+    void CountHardLinksOnce(FolderTree& tree, std::span<std::uint32_t const> records, SizeLookup const& lookup)
+    {
+        Folder* const root = tree.Root();
+        if (root == nullptr || records.empty())
+        {
+            return;
+        }
+        RecordSet wanted;
+        for (std::uint32_t const record : records)
+        {
+            (void)wanted.Insert(record);
+        }
+        std::vector<LinkName> const names =
+            NamesOf(tree, [&wanted](Entry const& entry) { return wanted.Contains(entry.record); });
+        std::vector<Folder*> changed;
+        if (CountOnce(names, lookup, changed))
+        {
+            tree.hardLinks = true;
         }
         UpdateTotalsUpward(*root, changed);
         tree.UpdateSpecialEntries();
+    }
+
+    std::vector<std::uint32_t> FileRecords(Folder const& folder)
+    {
+        std::vector<std::uint32_t> records;
+        ForEachFolder(folder, [&records](Folder const& at) {
+            for (Entry const& entry : at.entries)
+            {
+                if (entry.kind == EntryKind::File && entry.record != 0)
+                {
+                    records.push_back(entry.record);
+                }
+            }
+        });
+        std::ranges::sort(records);
+        records.erase(std::ranges::unique(records).begin(), records.end());
+        return records;
     }
 
     namespace
@@ -1080,29 +1170,26 @@ namespace sm
             return sizes;
         }
 
-        std::uint64_t CountUnreadable(Folder const& root)
+        std::int64_t CountUnreadable(Folder const& root)
         {
-            std::uint64_t count = 0;
-            std::vector<Folder const*> pending{ &root };
-            while (!pending.empty())
-            {
-                Folder const* const folder = pending.back();
-                pending.pop_back();
-                count += folder->unreadable ? 1 : 0;
-                for (Entry const& entry : folder->entries)
-                {
-                    if (entry.child)
-                    {
-                        pending.push_back(entry.child.get());
-                    }
-                }
-            }
+            std::int64_t count = 0;
+            ForEachFolder(root, [&count](Folder const& folder) { count += folder.unreadable ? 1 : 0; });
             return count;
         }
 
+        // A tree's count of unreadable folders, moved on by `change`.
+        void AddUnreadable(FolderTree& tree, std::int64_t change) noexcept
+        {
+            std::uint64_t const count = tree.unreadableFolders;
+            std::uint64_t const magnitude =
+                change < 0 ? 0 - static_cast<std::uint64_t>(change) : static_cast<std::uint64_t>(change);
+            tree.unreadableFolders = change >= 0 ? count + magnitude : (count > magnitude ? count - magnitude : 0);
+        }
+
         // Scans the folder at `extendedPath` into a new folder object; nothing if stopped.
-        std::unique_ptr<Folder> ScanInto(std::wstring const& extendedPath, VolumeInfo const& volume, ScanProgress& progress,
-                                         std::stop_token const& stop, IoCancellation& io, bool shallow)
+        std::unique_ptr<Folder> ScanInto(std::wstring const& extendedPath, VolumeInfo const& volume,
+                                         ScanProgress& progress, std::stop_token const& stop, IoCancellation& io,
+                                         bool shallow)
         {
             auto folder = std::make_unique<Folder>();
             ParallelScan scan(progress, stop, io, volume.clusterSize, ListsFileIds(volume), shallow);
@@ -1114,32 +1201,33 @@ namespace sm
             return folder;
         }
 
-        // After part of a tree changed: totals up to the root, hard links, the
-        // unreadable count and the free space.
-        void Settle(FolderTree& tree, std::span<Folder* const> changed)
+        // After part of a tree changed: totals up to the root, the space of
+        // the files `records` (whose names came or went, so a hard-linked one
+        // may now be counted under another name), and the free space.
+        void Settle(FolderTree& tree, std::span<Folder* const> changed, std::vector<std::uint32_t>& records)
         {
-            Folder& root = *tree.Root();
-            UpdateTotalsUpward(root, changed);
-            tree.unreadableFolders = CountUnreadable(root);
-            if (tree.rootRecord != 0)
+            UpdateTotalsUpward(*tree.Root(), changed);
+            if (tree.rootRecord != 0 && !records.empty())
             {
-                CountHardLinksOnce(tree, [&tree](Folder const& folder, std::size_t index) {
+                std::ranges::sort(records);
+                records.erase(std::ranges::unique(records).begin(), records.end());
+                CountHardLinksOnce(tree, records, [&tree](Folder const& folder, std::size_t index) {
                     return ReadSizeOnDisk(tree.PathOf(folder, index), folder.entries[index].attributes);
                 });
             }
             tree.RefreshFreeSpace();
         }
 
-        bool IsInside(Folder const* folder, Folder const* ancestor) noexcept
+        // The records of the files among `entries` (not below them).
+        void AddFileRecords(std::span<Entry const> entries, std::vector<std::uint32_t>& records)
         {
-            for (; folder != nullptr; folder = folder->parent)
+            for (Entry const& entry : entries)
             {
-                if (folder == ancestor)
+                if (entry.kind == EntryKind::File && entry.record != 0)
                 {
-                    return true;
+                    records.push_back(entry.record);
                 }
             }
-            return false;
         }
 
         Folder* ChildFolder(Folder const& folder, std::wstring_view name, bool ignoreCase) noexcept
@@ -1151,9 +1239,7 @@ namespace sm
                     continue;
                 }
                 std::wstring_view const listed = folder.Name(entry);
-                if (listed == name ||
-                    (ignoreCase && CompareStringOrdinal(listed.data(), static_cast<int>(listed.size()), name.data(),
-                                                        static_cast<int>(name.size()), TRUE) == CSTR_EQUAL))
+                if (listed == name || (ignoreCase && EqualsIgnoringCase(listed, name)))
                 {
                     return entry.child.get();
                 }
@@ -1226,6 +1312,15 @@ namespace sm
 
     void ReplaceContents(FolderTree& tree, Folder& folder, std::unique_ptr<Folder> fresh)
     {
+        tree.journalIndex.reset();  // the folders it held go
+
+        // The files whose names go and come, and the folders that could not
+        // be listed, before and after.
+        std::vector<std::uint32_t> records = FileRecords(folder);
+        std::vector<std::uint32_t> const added = FileRecords(*fresh);
+        records.insert(records.end(), added.begin(), added.end());
+        AddUnreadable(tree, CountUnreadable(*fresh) - CountUnreadable(folder));
+
         // What it held goes once nothing points into it any more.
         std::vector<Entry> const old = std::exchange(folder.entries, std::move(fresh->entries));
         folder.names = std::move(fresh->names);
@@ -1238,7 +1333,7 @@ namespace sm
             }
         }
         std::array<Folder*, 1> const changed{ &folder };
-        Settle(tree, changed);
+        Settle(tree, changed, records);
     }
 
     std::optional<FolderReload> PrepareReload(FolderTree const& tree, std::span<std::wstring const> folders,
@@ -1264,32 +1359,34 @@ namespace sm
             choose(Resolve(tree, relative, whole));
         }
 
-        // The tree's folders by record: one listed somewhere new may have moved there rather than be new.
-        std::vector<std::uint32_t> records;
-        if (tree.rootRecord != 0)
-        {
-            std::vector<Folder const*> pending{ tree.Root() };
-            while (!pending.empty())
+        // A folder listed somewhere new may have moved there rather than be
+        // new: is it one of the tree's?  The tree's folders by record, sorted,
+        // are only gathered for the first such folder.
+        std::optional<std::vector<std::uint32_t>> records;
+        auto const isFolderOfTheTree = [&tree, &records](std::uint32_t record) {
+            if (record == 0 || tree.rootRecord == 0)
             {
-                Folder const* const folder = pending.back();
-                pending.pop_back();
-                for (Entry const& entry : folder->entries)
-                {
-                    if (entry.child)
-                    {
-                        if (entry.record != 0)
-                        {
-                            records.push_back(entry.record);
-                        }
-                        pending.push_back(entry.child.get());
-                    }
-                }
+                return false;
             }
-            std::ranges::sort(records);
-        }
+            if (!records)
+            {
+                records.emplace();
+                ForEachFolder(std::as_const(*tree.Root()), [&records](Folder const& folder) {
+                    for (Entry const& entry : folder.entries)
+                    {
+                        if (entry.child && entry.record != 0)
+                        {
+                            records->push_back(entry.record);
+                        }
+                    }
+                });
+                std::ranges::sort(*records);
+            }
+            return std::ranges::binary_search(*records, record);
+        };
 
         std::unordered_map<Folder const*, Folder const*> listed;  // a folder of the tree, its new listing
-        for (std::size_t i = 0; i < targets.size(); ++i)  // NOLINT(modernize-loop-convert): grows as it goes
+        for (std::size_t i = 0; i < targets.size(); ++i)          // NOLINT(modernize-loop-convert): grows as it goes
         {
             Folder* const target = targets[i];
             std::wstring const path = ToExtendedLengthPath(tree.PathOf(*target));
@@ -1315,8 +1412,7 @@ namespace sm
                     continue;
                 }
                 std::wstring_view const name = now->Name(entry);
-                if (ChildFolder(*target, name, false) != nullptr ||
-                    (entry.record != 0 && std::ranges::binary_search(records, entry.record)))
+                if (ChildFolder(*target, name, false) != nullptr || isFolderOfTheTree(entry.record))
                 {
                     continue;
                 }
@@ -1350,8 +1446,10 @@ namespace sm
                 break;
             }
             std::size_t const slash = relative.rfind(L'\\');
-            std::wstring_view const inFolder = slash == std::wstring::npos ? std::wstring_view() : std::wstring_view(relative).substr(0, slash);
-            std::wstring_view const name = slash == std::wstring::npos ? std::wstring_view(relative) : std::wstring_view(relative).substr(slash + 1);
+            std::wstring_view const inFolder =
+                slash == std::wstring::npos ? std::wstring_view() : std::wstring_view(relative).substr(0, slash);
+            std::wstring_view const name = slash == std::wstring::npos ? std::wstring_view(relative)
+                                                                       : std::wstring_view(relative).substr(slash + 1);
             bool whole = false;
             Folder* const folder = Resolve(tree, inFolder, whole);
             if (!whole)
@@ -1365,7 +1463,8 @@ namespace sm
                 continue;
             }
             ++read;
-            std::optional<FileSizes> const sizes = ReadFileSizes(tree.PathOf(*folder) + std::wstring(name), entry->attributes);
+            std::optional<FileSizes> const sizes =
+                ReadFileSizes(tree.PathOf(*folder) + std::wstring(name), entry->attributes);
             if (sizes && (sizes->size != entry->size || sizes->length != entry->logicalSize))
             {
                 reload.grown.push_back({ folder, std::wstring(name), sizes->size, sizes->length });
@@ -1377,31 +1476,8 @@ namespace sm
 
     void ApplyReload(FolderTree& tree, FolderReload reload)
     {
-        Folder const* const root = tree.Root();
-
-        // Every folder of the tree by record, before any is taken out: one
-        // moved may come from deep inside another that moved too.
-        std::unordered_map<std::uint32_t, Folder*> folderByRecord;
-        if (tree.rootRecord != 0)
-        {
-            std::vector<Folder const*> pending{ root };
-            while (!pending.empty())
-            {
-                Folder const* const folder = pending.back();
-                pending.pop_back();
-                for (Entry const& entry : folder->entries)
-                {
-                    if (entry.child)
-                    {
-                        if (entry.record != 0)
-                        {
-                            folderByRecord.emplace(entry.record, entry.child.get());
-                        }
-                        pending.push_back(entry.child.get());
-                    }
-                }
-            }
-        }
+        Folder* const root = tree.Root();
+        tree.journalIndex.reset();  // folders come and go
 
         // The sub-folders of every folder listed again, taken out: they go
         // back in by name - or, moved, by record.
@@ -1430,52 +1506,130 @@ namespace sm
             }
         }
 
+        // Every folder of the tree by record, for one that moved in from a
+        // folder not listed again: gathered only then - from the tree, from
+        // what was taken out of it, and from what the listing being put in
+        // place has taken back so far, as one moved may come from deep inside
+        // another that moved too.  Only folders that were listed: a folder
+        // a listing put in place but could not find stands empty for the
+        // real one, and is no place to take a folder from.
+        std::optional<std::unordered_map<std::uint32_t, Folder*>> folderByRecord;
+        std::vector<std::pair<std::uint32_t, Folder*>> keptHere;  // by the listing being put in place
+        auto const folderOf = [&](std::uint32_t record) -> Folder* {
+            if (record == 0 || tree.rootRecord == 0)
+            {
+                return nullptr;
+            }
+            if (!folderByRecord)
+            {
+                folderByRecord.emplace();
+                auto const gather = [&folderByRecord](std::uint32_t own, Folder& top) {
+                    if (own != 0)
+                    {
+                        folderByRecord->emplace(own, &top);
+                    }
+                    ForEachFolder(top, [&folderByRecord](Folder& folder) {
+                        for (Entry const& entry : folder.entries)
+                        {
+                            if (entry.child && entry.record != 0 && entry.child->listed.load(std::memory_order_relaxed))
+                            {
+                                folderByRecord->emplace(entry.record, entry.child.get());
+                            }
+                        }
+                    });
+                };
+                gather(0, *root);
+                for (auto const& [own, at] : byRecord)
+                {
+                    if (Folder* const folder = detached[at].folder.get(); folder != nullptr)
+                    {
+                        gather(own, *folder);
+                    }
+                }
+                for (auto const& [own, folder] : keptHere)
+                {
+                    gather(own, *folder);
+                }
+            }
+            auto const found = folderByRecord->find(record);
+            return found != folderByRecord->end() ? found->second : nullptr;
+        };
+
+        // What changes with it: the files whose names came, went or moved
+        // (their space may now be counted under another name), and the
+        // number of folders that could not be listed.
+        std::vector<std::uint32_t> records;
+        std::int64_t unreadable = 0;
+        auto const allFilesIn = [&records](Folder const& folder) {
+            std::vector<std::uint32_t> const inside = FileRecords(folder);
+            records.insert(records.end(), inside.begin(), inside.end());
+        };
+
         // Each folder as listed now.
         std::vector<Folder*> touched;
         for (FolderReload::Listing const& listing : reload.listings)
         {
             Folder& folder = *listing.folder;
             Folder& now = *listing.now;
+            AddFileRecords(folder.entries, records);
+            AddFileRecords(now.entries, records);
+            unreadable += (now.unreadable ? 1 : 0) - (folder.unreadable ? 1 : 0);
+            keptHere.clear();
             for (Entry& entry : now.entries)
             {
-                // A file; or a folder new to the tree, scanned (where the others were only named).
-                if (!entry.child || entry.child->listed.load(std::memory_order_relaxed))
+                if (!entry.child)
                 {
+                    continue;  // a file
+                }
+                if (entry.child->listed.load(std::memory_order_relaxed))
+                {
+                    // A folder new to the tree, scanned (where the others were only named).
+                    allFilesIn(*entry.child);
+                    unreadable += CountUnreadable(*entry.child);
                     continue;
                 }
                 std::unique_ptr<Folder>* kept = nullptr;
+                bool moved = false;
                 if (auto const found = byName.find({ &folder, std::wstring(now.Name(entry)) });
                     found != byName.end() && detached[found->second].folder)
                 {
                     kept = &detached[found->second].folder;
                 }
-                else if (auto const moved = byRecord.find(entry.record);
-                         entry.record != 0 && moved != byRecord.end() && detached[moved->second].folder)
+                else if (auto const from = byRecord.find(entry.record);
+                         entry.record != 0 && from != byRecord.end() && detached[from->second].folder)
                 {
-                    kept = &detached[moved->second].folder;
+                    kept = &detached[from->second].folder;
+                    moved = true;
                 }
                 if (kept != nullptr)
                 {
-                    if (!IsInside(&folder, kept->get()))
+                    if (!folder.IsWithin(kept->get()))
                     {
                         entry.child = std::move(*kept);
+                        keptHere.emplace_back(entry.record, entry.child.get());
+                        if (moved)
+                        {
+                            allFilesIn(*entry.child);
+                        }
                     }
                     continue;
                 }
                 // Moved here from a folder not listed again: take it from there.
-                auto const known = folderByRecord.find(entry.record);
-                Folder const* const moved = entry.record != 0 && known != folderByRecord.end() ? known->second : nullptr;
-                if (moved == nullptr || moved->parent == nullptr || IsInside(&folder, moved))
+                Folder const* const elsewhere = folderOf(entry.record);
+                if (elsewhere == nullptr || elsewhere->parent == nullptr || folder.IsWithin(elsewhere))
                 {
                     continue;  // what it holds stays unknown until the next full scan
                 }
-                Folder& from = *moved->parent;
-                auto const at = std::ranges::find_if(from.entries, [moved](Entry const& e) { return e.child.get() == moved; });
+                Folder& from = *elsewhere->parent;
+                auto const at = std::ranges::find_if(
+                    from.entries, [elsewhere](Entry const& e) { return e.child.get() == elsewhere; });
                 if (at != from.entries.end())
                 {
                     entry.child = std::move(at->child);
                     from.entries.erase(at);
                     touched.push_back(&from);
+                    keptHere.emplace_back(entry.record, entry.child.get());
+                    allFilesIn(*entry.child);
                 }
             }
             folder.entries = std::move(now.entries);
@@ -1494,7 +1648,7 @@ namespace sm
         // Files whose listing lags behind them.
         for (FolderReload::Grown const& grown : reload.grown)
         {
-            if (!IsInside(grown.folder, root))
+            if (!grown.folder->IsWithin(root))
             {
                 continue;
             }
@@ -1511,8 +1665,18 @@ namespace sm
         }
         tree.growingFiles = std::move(reload.growing);
 
-        detached.clear();  // what is left was deleted
-        Settle(tree, touched);
+        // What is left was deleted.
+        for (Detached const& gone : detached)
+        {
+            if (gone.folder)
+            {
+                allFilesIn(*gone.folder);
+                unreadable -= CountUnreadable(*gone.folder);
+            }
+        }
+        detached.clear();
+        AddUnreadable(tree, unreadable);
+        Settle(tree, touched, records);
     }
 
     std::wstring ScanProgress::CurrentPath() const
@@ -1581,6 +1745,7 @@ namespace sm
             return;
         }
 
+        journalIndex.reset();  // the folders and files of the entry go
         Entry const& entry = folder.entries[index];
         std::uint64_t const size = entry.size;
         std::uint64_t const logical = entry.logicalSize;
@@ -1621,27 +1786,13 @@ namespace sm
         {
             return paths;
         }
-        std::vector<Folder const*> pending{ root_.get() };
-        while (!pending.empty())
-        {
-            Folder const* const folder = pending.back();
-            pending.pop_back();
-            if (folder->unreadable)
+        ForEachFolder(std::as_const(*root_), [this, &paths](Folder const& folder) {
+            if (folder.unreadable)
             {
-                paths.push_back(PathOf(*folder));
+                paths.push_back(PathOf(folder));
             }
-            for (Entry const& entry : folder->entries)
-            {
-                if (entry.child)
-                {
-                    pending.push_back(entry.child.get());
-                }
-            }
-        }
-        std::ranges::sort(paths, [](std::wstring const& a, std::wstring const& b) {
-            return CompareStringOrdinal(a.c_str(), static_cast<int>(a.size()), b.c_str(), static_cast<int>(b.size()),
-                                        TRUE) == CSTR_LESS_THAN;
         });
+        std::ranges::sort(paths, LessIgnoringCase);
         return paths;
     }
 
@@ -1716,9 +1867,7 @@ namespace sm
         }
 
         VolumeInfo volume = QueryVolume(displayPath);
-        bool const wholeVolume =
-            !volume.root.empty() &&
-            CompareStringOrdinal(volume.root.c_str(), -1, displayPath.c_str(), -1, TRUE) == CSTR_EQUAL;
+        bool const wholeVolume = !volume.root.empty() && EqualsIgnoringCase(volume.root, displayPath);
         progress.expectedBytes.store(wholeVolume ? volume.UsedBytes() : 0, std::memory_order_relaxed);
 
         // A whole NTFS drive, with administrator rights: read its master file table.

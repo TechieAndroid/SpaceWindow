@@ -19,20 +19,20 @@ namespace sm::ui
             SecondaryText,
             TertiaryText,
             DisabledText,
-            Glyph,               // check marks in menus
-            Accent,              // default buttons, toggles, check boxes, progress bars, sliders
-            Link,                // accent-coloured text
-            OnAccent,            // text on the accent colour
+            Glyph,     // check marks in menus
+            Accent,    // default buttons, toggles, check boxes, progress bars, sliders
+            Link,      // accent-coloured text
+            OnAccent,  // text on the accent colour
             OnAccentSecondary,
             Background,
-            Surface,             // dialogs, menus, drop-down lists, tooltips
-            CommandArea,         // the button row of a dialog
+            Surface,      // dialogs, menus, drop-down lists, tooltips
+            CommandArea,  // the button row of a dialog
             SurfaceSecondary,
             SurfaceQuarternary,
-            Raised,              // slider thumbs
-            Input,               // a text box being typed in
-            Border,              // the edges of dialogs, menus and tooltips
-            Divider,             // separators
+            Raised,   // slider thumbs
+            Input,    // a text box being typed in
+            Border,   // the edges of dialogs, menus and tooltips
+            Divider,  // separators
         };
         constexpr std::size_t kRoleCount = static_cast<std::size_t>(Role::Divider) + 1;
 
@@ -67,10 +67,10 @@ namespace sm::ui
             BrushSpec{ L"SolidBackgroundFillColorSecondaryBrush", Role::SurfaceSecondary },
             BrushSpec{ L"SolidBackgroundFillColorTertiaryBrush", Role::Surface },
             BrushSpec{ L"SolidBackgroundFillColorQuarternaryBrush", Role::SurfaceQuarternary },
-            BrushSpec{ L"LayerFillColorAltBrush", Role::Surface },                         // dialogs
-            BrushSpec{ L"SystemControlBackgroundChromeMediumLowBrush", Role::Surface },    // tooltips
-            BrushSpec{ L"DesktopAcrylicTransparentBrush", Role::Surface },                 // menus
-            BrushSpec{ L"AcrylicInAppFillColorDefaultBrush", Role::Surface },              // drop-down lists, flyouts
+            BrushSpec{ L"LayerFillColorAltBrush", Role::Surface },                       // dialogs
+            BrushSpec{ L"SystemControlBackgroundChromeMediumLowBrush", Role::Surface },  // tooltips
+            BrushSpec{ L"DesktopAcrylicTransparentBrush", Role::Surface },               // menus
+            BrushSpec{ L"AcrylicInAppFillColorDefaultBrush", Role::Surface },            // drop-down lists, flyouts
             BrushSpec{ L"AcrylicBackgroundFillColorDefaultBrush", Role::Surface },
             BrushSpec{ L"ControlSolidFillColorDefaultBrush", Role::Raised },
             BrushSpec{ L"ControlFillColorInputActiveBrush", Role::Input },

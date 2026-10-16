@@ -8,7 +8,8 @@
 // fits: never tilted or shifted.  A folder's name too long for its slice is
 // shortened to its first letters and "..." (five letters at least); other
 // names show whole or not at all.  Zooming in makes room; until then the name
-// tip and the info tip show what a slice has no room for.
+// tip and the info tip show what a slice has no room for.  The rules are in
+// src/Core/LabelFit.cpp (tested there); this file measures and draws.
 #include "pch.h"
 #include "MapRenderer.h"
 
@@ -43,130 +44,35 @@ namespace sm::ui
             return highlighted ? sm::Mix(colors.grouped, colors.lightText, 0.2) : colors.grouped;
         }
 
+        // What shows behind the map, for text drawn straight on it: the
+        // animation's dark canvas, the window's colour, or Mica.
+        sm::Rgb Behind(MapScene const& scene) noexcept
+        {
+            if (scene.backdrop != sm::Backdrop::None)
+            {
+                return { 0x04, 0x04, 0x06 };
+            }
+            if (scene.background)
+            {
+                return *scene.background;
+            }
+            return scene.darkTheme ? sm::Rgb{ 0x20, 0x20, 0x20 } : sm::Rgb{ 0xF3, 0xF3, 0xF3 };
+        }
+
         // Free space under the mouse: one step towards the text colour.
         sm::Rgb Lift(MapScene const& scene, sm::Rgb color) noexcept
         {
-            return scene.darkTheme ? sm::Mix(color, scene.colors.lightText, 0.18) : sm::Mix(color, scene.colors.darkText, 0.1);
+            return scene.darkTheme ? sm::Mix(color, scene.colors.lightText, 0.18)
+                                   : sm::Mix(color, scene.colors.darkText, 0.1);
         }
 
-        // A part of a ring: [inner, outer] pixels from the centre, [start,
-        // start + sweep] radians clockwise from twelve o'clock.  An inner
-        // radius of 0 is a whole disc.
-        struct Segment
+        // A fitted label (sm::FitLabel) as the renderer draws it.
+        PieLabel ToPieLabel(sm::FittedLabel label) noexcept
         {
-            sm::PiePoint center;
-            double inner = 0.0;
-            double outer = 0.0;
-            double start = 0.0;
-            double sweep = kTwoPi;
-        };
-
-        // Is the point inside the segment, at least `pad` pixels from its edges?
-        bool Inside(Segment const& segment, double x, double y, double pad) noexcept
-        {
-            double const dx = x - segment.center.x;
-            double const dy = y - segment.center.y;
-            double const radius = std::hypot(dx, dy);
-            if ((segment.inner > 0.0 && radius < segment.inner + pad) || radius > segment.outer - pad)
-            {
-                return false;
-            }
-            if (segment.sweep >= kFullTurn)
-            {
-                return true;
-            }
-            double angle = std::atan2(dx, -dy);
-            if (angle < 0.0)
-            {
-                angle += kTwoPi;
-            }
-            double const margin = pad / std::max(radius, 1.0);  // `pad` pixels, as an angle at this radius
-            return angle >= segment.start + margin && angle <= segment.start + segment.sweep - margin;
-        }
-
-        // The widest level block of text `height` pixels tall, centred on
-        // `anchor`, that fits inside the segment with `pad` pixels to spare
-        // (0 if none does).
-        double Room(Segment const& segment, sm::PiePoint anchor, double height, double pad)
-        {
-            auto const fits = [&](double width) {
-                double const halfWidth = width / 2.0;
-                double const halfHeight = height / 2.0;
-                for (double const dx : { -halfWidth, 0.0, halfWidth })
-                {
-                    for (double const dy : { -halfHeight, 0.0, halfHeight })
-                    {
-                        if (!Inside(segment, anchor.x + dx, anchor.y + dy, pad))
-                        {
-                            return false;
-                        }
-                    }
-                }
-                if (segment.inner <= 0.0)
-                {
-                    return true;
-                }
-                // Corners and edge midpoints are in; no part of the block may dip into
-                // the ring's hole either.  Find its point nearest the centre.
-                double const dx = segment.center.x - anchor.x;
-                double const dy = segment.center.y - anchor.y;
-                return std::hypot(dx - std::clamp(dx, -halfWidth, halfWidth), dy - std::clamp(dy, -halfHeight, halfHeight)) >=
-                       segment.inner + pad;
-            };
-            if (!fits(0.0))
-            {
-                return 0.0;
-            }
-            double fitting = 0.0;
-            double failing = 2.0 * segment.outer;
-            while (failing - fitting > 0.5)
-            {
-                double const width = (fitting + failing) / 2.0;
-                (fits(width) ? fitting : failing) = width;
-            }
-            return fitting;
-        }
-
-        // Fits `name` - and `detail` on a second line, when both fit whole -
-        // level and centred on `anchor`.  If `mayTrim`, a name too long for
-        // the room is shortened (by `shorten`, to the room's width), if it can be.
-        template <typename Measure, typename Shorten>
-        std::optional<PieLabel> FitText(Segment const& segment, sm::PiePoint anchor, double pad, double lineHeight,
-                                        std::wstring const& name, std::wstring const& detail, bool mayTrim,
-                                        Measure const& measure, Shorten const& shorten)
-        {
-            auto const label = [anchor, lineHeight](std::wstring text, double width, double lines, bool trimmed) {
-                double const height = lines * lineHeight;
-                return PieLabel{ std::move(text),
-                                 D2D1::RectF(static_cast<float>(anchor.x - width / 2.0),
-                                             static_cast<float>(anchor.y - height / 2.0),
-                                             static_cast<float>(anchor.x + width / 2.0),
-                                             static_cast<float>(anchor.y + height / 2.0)),
-                                 trimmed };
-            };
-            constexpr double kSlack = 2.0;  // DirectWrite trims text set in a box exactly its own width
-            double const nameWidth = measure(name) + kSlack;
-            double const detailWidth = measure(detail) + kSlack;
-            double const both = std::max(nameWidth, detailWidth);
-            if (Room(segment, anchor, 2.0 * lineHeight, pad) >= both)
-            {
-                std::wstring text = name;
-                text.append(L"\n").append(detail);
-                return label(std::move(text), both, 2.0, false);
-            }
-            double const room = Room(segment, anchor, lineHeight, pad);
-            if (room >= nameWidth)
-            {
-                return label(name, nameWidth, 1.0, false);
-            }
-            if (mayTrim)
-            {
-                if (std::wstring shortened = shorten(name, room - kSlack); !shortened.empty())
-                {
-                    return label(std::move(shortened), room, 1.0, true);
-                }
-            }
-            return std::nullopt;
+            return PieLabel{ std::move(label.text),
+                             D2D1::RectF(static_cast<float>(label.left), static_cast<float>(label.top),
+                                         static_cast<float>(label.right), static_cast<float>(label.bottom)),
+                             label.trimmed };
         }
     }
 
@@ -270,8 +176,9 @@ namespace sm::ui
                 double const innerFrom = start + turn(a);
                 double const innerTo = start + sweep - turn(a);
                 sink->AddLine(point(a, innerTo));
-                sink->AddArc(D2D1::ArcSegment(point(a, innerFrom), D2D1::SizeF(static_cast<float>(a), static_cast<float>(a)),
-                                              0.0f, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, arcSize(innerTo - innerFrom)));
+                sink->AddArc(D2D1::ArcSegment(point(a, innerFrom),
+                                              D2D1::SizeF(static_cast<float>(a), static_cast<float>(a)), 0.0f,
+                                              D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, arcSize(innerTo - innerFrom)));
             }
             sink->EndFigure(D2D1_FIGURE_END_CLOSED);
         }
@@ -321,21 +228,31 @@ namespace sm::ui
     {
         sm::PieLayout const& pie = *scene.pie;
         sm::Folder const* const root = pie.Root();
-        double const radius = pie.HubRadius() - pie.Options().gap / 2.0;
-        if (root == nullptr || radius <= 0.0)
+        if (root == nullptr)
+        {
+            return;
+        }
+        sm::PiePoint const center = pie.Center();
+        double const inset = pie.Options().gap / 2.0;
+        winrt::com_ptr<ID2D1PathGeometry1> const shape =
+            SectorShape(center, pie.HubInner(), pie.HubOuter(), 0.0, kTwoPi, inset);
+        if (!shape)
         {
             return;
         }
 
-        // The hub stands for the current folder: its name and the space the pie shows.
-        sm::PiePoint const center = pie.Center();
-        D2D1_ELLIPSE const disc = D2D1::Ellipse(D2D1::Point2F(static_cast<float>(center.x), static_cast<float>(center.y)),
-                                                static_cast<float>(radius), static_cast<float>(radius));
-        sm::Rgb const face = scene.colors.freeSpace;
-        brush_->SetColor(ToColor(face));
-        context_->FillEllipse(disc, brush_.get());
-        brush_->SetColor(ToColor(GroupColor(scene, false)));
-        context_->DrawEllipse(disc, brush_.get(), static_cast<float>(lineWidth_));
+        // The hub - or, in the inverted pie, the rim - stands for the current
+        // folder: its name and the space the pie shows.  The rim is open: no
+        // fill and no edge, just the name over whatever is behind the map.
+        bool const rim = pie.HubInner() > 0.0;
+        sm::Rgb const face = rim ? Behind(scene) : scene.colors.freeSpace;
+        if (!rim)
+        {
+            brush_->SetColor(ToColor(face));
+            context_->FillGeometry(shape.get(), brush_.get());
+            brush_->SetColor(ToColor(GroupColor(scene, false)));
+            context_->DrawGeometry(shape.get(), brush_.get(), static_cast<float>(lineWidth_));
+        }
 
         std::wstring name;
         if (root->parent != nullptr)
@@ -354,22 +271,25 @@ namespace sm::ui
             name = path;
         }
         std::wstring const total = sm::FormatSize(pie.Total(), *scene.lang);
-        Segment const segment{ center, 0.0, radius, 0.0, kTwoPi };
-        auto const measure = [this](std::wstring_view text) { return TextWidth(text); };
-        auto const shorten = [this](std::wstring_view text, double width) { return FitName(text, static_cast<float>(width)); };
-        // The hub does not grow when zooming, so its name is shortened rather than left out.
-        if (std::optional<PieLabel> const label =
-                FitText(segment, center, 2.0 * lineWidth_, lineHeight_, name, total, true, measure, shorten))
+        double const inner = pie.HubInner() > 0.0 ? pie.HubInner() + inset : 0.0;
+        double const outer = pie.HubOuter() - inset;
+        sm::RingSegment const segment{ center, inner, outer, 0.0, kTwoPi };
+        // The hub's label sits in its middle; the rim's at its top, like a title.
+        sm::PiePoint const anchor = inner > 0.0 ? sm::PiePoint{ center.x, center.y - (inner + outer) / 2.0 } : center;
+        // The hub does not grow when zooming, so its name is shortened rather
+        // than left out.  A thin rim has room for one line: the size goes beside the name.
+        if (std::optional<sm::FittedLabel> label = sm::FitLabel(segment, anchor, 2.0 * lineWidth_, lineHeight_, name,
+                                                                total, true, true, Measure(), Shorten()))
         {
-            DrawPieLabel(scene, *label, face);
+            DrawPieLabel(scene, ToPieLabel(std::move(*label)), face);
         }
     }
 
     std::optional<PieLabel> MapRenderer::SliceLabel(MapScene const& scene, sm::PieSlice const& slice) const
     {
         sm::PieLayout const& pie = *scene.pie;
-        Segment const segment{ pie.Center(), pie.InnerRadius(slice.ring), pie.OuterRadius(slice.ring), slice.start,
-                               slice.sweep };
+        sm::RingSegment const segment{ pie.Center(), pie.InnerRadius(slice.ring), pie.OuterRadius(slice.ring),
+                                       slice.start, slice.sweep };
         double const pad = pie.Options().gap / 2.0 + 2.0 * lineWidth_;
         // Most slices are too small for any text: rule them out before measuring.
         // A line of text needs its height one way and a few letters the other,
@@ -398,16 +318,25 @@ namespace sm::ui
             name = slice.source->Name(slice.index);
         }
         // Level text in the middle of the slice - halfway round it and halfway
-        // through the ring - or nothing: a name that does not fit there (a
-        // folder's, shortened to its first letters, at least) waits for a zoom
-        // to give it room.
-        double const angle = slice.start + slice.sweep / 2.0;
-        double const radius = (segment.inner + segment.outer) / 2.0;
-        sm::PiePoint const middle{ segment.center.x + radius * std::sin(angle), segment.center.y - radius * std::cos(angle) };
+        // through the ring, or further out in a slice that comes to a point in
+        // the centre (PieLayout::Centroid) - or nothing: a name that does not
+        // fit there (a folder's, shortened to its first letters, at least)
+        // waits for a zoom to give it room.
+        sm::PiePoint const middle = pie.Centroid(slice);
         std::wstring const size = sm::FormatSize(slice.bytes, lang);
-        auto const measure = [this](std::wstring_view text) { return TextWidth(text); };
-        auto const shorten = [this](std::wstring_view text, double width) { return FitName(text, static_cast<float>(width)); };
-        return FitText(segment, middle, pad, lineHeight_, name, size, slice.IsFolder(), measure, shorten);
+        std::optional<sm::FittedLabel> label =
+            sm::FitLabel(segment, middle, pad, lineHeight_, name, size, slice.IsFolder(), false, Measure(), Shorten());
+        return label ? std::optional<PieLabel>(ToPieLabel(std::move(*label))) : std::nullopt;
+    }
+
+    sm::MeasureText MapRenderer::Measure() const
+    {
+        return [this](std::wstring_view text) { return static_cast<double>(TextWidth(text)); };
+    }
+
+    sm::ShortenName MapRenderer::Shorten() const
+    {
+        return [this](std::wstring_view text, double width) { return FitName(text, static_cast<float>(width)); };
     }
 
     void MapRenderer::DrawPieLabel(MapScene const& scene, PieLabel const& label, sm::Rgb face)

@@ -74,15 +74,20 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="BackdropTests.cpp" />
     <ClCompile Include="Bench.cpp" />
+    <ClCompile Include="CommandTests.cpp" />
     <ClCompile Include="Compare.cpp" />
     <ClCompile Include="FormatTests.cpp" />
+    <ClCompile Include="LabelFitTests.cpp" />
     <ClCompile Include="LayoutTests.cpp" />
     <ClCompile Include="NtfsTests.cpp" />
     <ClCompile Include="PieLayoutTests.cpp" />
     <ClCompile Include="ScanTests.cpp" />
     <ClCompile Include="SettingsTests.cpp" />
     <ClCompile Include="ThemeTests.cpp" />
+    <ClCompile Include="TreeTests.cpp" />
+    <ClCompile Include="UtilityTests.cpp" />
     <ClCompile Include="ViewHistoryTests.cpp" />
     <ClCompile Include="VolumeTests.cpp" />
   </ItemGroup>

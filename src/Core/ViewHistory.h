@@ -17,7 +17,7 @@ namespace sm
     class ViewHistory
     {
     public:
-        using Path = std::vector<std::wstring>;     // folder names from the root of the scan
+        using Path = std::vector<std::wstring>;      // folder names from the root of the scan
         static constexpr std::size_t kLength = 100;  // views Back can return to
 
         // Before the view moves away from `view`: Back returns to it, and

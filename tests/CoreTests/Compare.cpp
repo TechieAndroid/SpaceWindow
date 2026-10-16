@@ -9,6 +9,8 @@
 #include "Compare.h"
 #include "TestHarness.h"
 
+#include "../../src/Core/Text.h"
+
 namespace test
 {
     namespace
@@ -60,10 +62,11 @@ namespace test
                         ++files_;
                         if (entry.size != other.size)
                         {
-                            bool const compressed = (entry.attributes & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE |
-                                                                         FILE_ATTRIBUTE_REPARSE_POINT)) != 0;
-                            Note(compressed ? "size on disk (compressed, sparse or reparse point)" : "size on disk", where,
-                                 entry.size, other.size);
+                            bool const compressed =
+                                (entry.attributes & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE |
+                                                     FILE_ATTRIBUTE_REPARSE_POINT)) != 0;
+                            Note(compressed ? "size on disk (compressed, sparse or reparse point)" : "size on disk",
+                                 where, entry.size, other.size);
                         }
                         if (entry.logicalSize != other.logicalSize)
                         {
@@ -135,8 +138,7 @@ namespace test
             for (sm::Entry const& entry : within->entries)
             {
                 std::wstring_view const candidate = within->Name(entry);
-                if (entry.child && CompareStringOrdinal(candidate.data(), static_cast<int>(candidate.size()), name.data(),
-                                                        static_cast<int>(name.size()), TRUE) == CSTR_EQUAL)
+                if (entry.child && sm::EqualsIgnoringCase(candidate, name))
                 {
                     next = entry.child.get();
                 }
@@ -152,7 +154,8 @@ namespace
     void PrintTree(char const* name, sm::FolderTree const& tree, sm::Folder const& folder)
     {
         std::printf("  %-20s %10llu files %9llu folders %16llu bytes on disk  (scan: %lld ms)\n", name,
-                    static_cast<unsigned long long>(folder.fileCount), static_cast<unsigned long long>(folder.folderCount),
+                    static_cast<unsigned long long>(folder.fileCount),
+                    static_cast<unsigned long long>(folder.folderCount),
                     static_cast<unsigned long long>(folder.SizeTotal()), static_cast<long long>(tree.elapsed.count()));
     }
 
@@ -206,7 +209,8 @@ int RunCompare(std::wstring_view path)
         return 2;
     }
 
-    sm::Folder const* const within = test::FindFolder(*table.tree->Root(), std::wstring_view(folder).substr(std::wcslen(volume)));
+    sm::Folder const* const within =
+        test::FindFolder(*table.tree->Root(), std::wstring_view(folder).substr(std::wcslen(volume)));
     if (within == nullptr)
     {
         std::printf("The folder is not in the master file table's tree.\n");

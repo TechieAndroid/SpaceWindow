@@ -24,7 +24,8 @@ namespace sm
 
     LayoutOptions LayoutOptions::ForDensity(int density, double scale)
     {
-        auto const row = static_cast<std::size_t>(std::clamp(density + 3, 0, static_cast<int>(std::size(kMinSizes)) - 1));
+        auto const row =
+            static_cast<std::size_t>(std::clamp(density + 3, 0, static_cast<int>(std::size(kMinSizes)) - 1));
         LayoutOptions options;
         options.minWidth = Scaled(kMinSizes[row][0], scale);
         options.minHeight = Scaled(kMinSizes[row][1], scale);

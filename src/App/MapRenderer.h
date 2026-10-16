@@ -15,11 +15,17 @@
 //  * The pie chart (MapRendererPie.cpp) is antialiased, separates its slices
 //    with a gap of background rather than outlines, and labels a slice only
 //    where the label fits; the name and info tips carry the rest.
+//  * A background animation (MapRendererBackdrop.cpp) can play behind the
+//    map: the cached map then keeps a transparent background and is drawn
+//    over the animation every frame.
 //  * Survives GPU resets (device-lost handling).
 #pragma once
 
+#include "../Core/Backdrop.h"
+#include "../Core/LabelFit.h"
 #include "../Core/Palette.h"
 #include "../Core/PieLayout.h"
+#include "../Core/Settings.h"
 #include "../Core/Theme.h"
 #include "../Core/TreemapLayout.h"
 
@@ -27,7 +33,6 @@ namespace sm
 {
     class FolderTree;
     struct Lang;
-    struct Settings;
 }
 
 namespace sm::ui
@@ -46,6 +51,9 @@ namespace sm::ui
         // Behind the map: the window's colour, or nothing so that Mica shows
         // through (the swap chain shows nothing else of what is behind it).
         std::optional<sm::Rgb> background;
+        // ... or an animation, on a dark canvas of its own; `time` in seconds moves it on.
+        sm::Backdrop backdrop = sm::Backdrop::None;
+        double time = 0.0;
     };
 
     // A segment of the pie chart's rings (for its zoom animation).
@@ -136,11 +144,14 @@ namespace sm::ui
         void Fill(float left, float top, float right, float bottom, D2D1_COLOR_F const& color);
         sm::BoxColors Colors(MapScene const& scene, bool folder, bool special, int depth, bool highlighted,
                              bool selected) const;
+
+        // How wide a text is drawn in the map's font.  Remembered: the same
+        // names are measured again whenever the map is redrawn.
         float TextWidth(std::wstring_view text) const;
 
-        // A folder's name as it fits `width` pixels: whole; else its first
-        // letters - five at least - followed by "...", as many as fit with the
-        // dots; else nothing.  Measured, so the name never runs off its box.
+        // A folder's name as it fits `width` pixels (sm::FitName): whole, or
+        // shortened with "...", or nothing.  Measured letter by letter, so the
+        // name never runs off its box.
         std::wstring FitName(std::wstring_view name, float width) const;
 
         // The pie chart (MapRendererPie.cpp).
@@ -152,6 +163,17 @@ namespace sm::ui
         winrt::com_ptr<ID2D1PathGeometry1> SectorShape(sm::PiePoint center, double inner, double outer, double start,
                                                        double sweep, double inset) const;
         std::optional<PieLabel> SliceLabel(MapScene const& scene, sm::PieSlice const& slice) const;
+        sm::MeasureText Measure() const;  // TextWidth, for sm::FitLabel
+        sm::ShortenName Shorten() const;  // FitName, for sm::FitLabel
+
+        // The background animations (MapRendererBackdrop.cpp): stepped and
+        // drawn off-screen before a frame, then drawn under the map.
+        void PrepareBackdrop(MapScene const& scene);
+        void DrawBackdrop(MapScene const& scene);
+        void PrepareGrid(int cell, double rate, double time, bool smooth);
+        void PrepareRain(double time);
+        void DrawTunnel(double time);
+        void ReleaseBackdrop() noexcept;
 
         winrt::com_ptr<ID2D1Factory1> d2dFactory_;
         winrt::com_ptr<IDWriteFactory> dwriteFactory_;
@@ -173,6 +195,17 @@ namespace sm::ui
         float lineHeight_ = 0.0f;
         float dotsWidth_ = 0.0f;  // of the "..." that ends a shortened name
 
+        // Widths measured at this scale, by text (looked up by view, without a copy).
+        struct TextHash
+        {
+            using is_transparent = void;
+            std::size_t operator()(std::wstring_view text) const noexcept
+            {
+                return std::hash<std::wstring_view>{}(text);
+            }
+        };
+        mutable std::unordered_map<std::wstring, float, TextHash, std::equal_to<>> widths_;
+
         int width_ = 1;
         int height_ = 1;
         float scaleX_ = 1.0f;
@@ -180,5 +213,33 @@ namespace sm::ui
         float scale_ = 1.0f;
         int lineWidth_ = 1;
         bool baseValid_ = false;
+        bool baseTransparent_ = false;  // the cached map was drawn for an animation to show around it
+
+        // The background animation playing, and what it needs from frame to frame.
+        struct BackdropState
+        {
+            sm::Backdrop kind = sm::Backdrop::None;
+            sm::Random random;
+            double next = 0.0;  // seconds: when it next steps
+            sm::FireField fire;
+            sm::MatrixRain rain;
+            sm::LifeField life;
+            float phaseA = 0.0f;  // the colour mix's pattern
+            float phaseB = 0.0f;
+            int columns = 0;  // of the grid animations (fire, colour mix, life), in cells
+            int rows = 0;
+            int cell = 1;        // pixels
+            bool smooth = true;  // stretched smoothly (fire, colour mix) or as squares (life)
+            std::vector<std::uint32_t> pixels;
+            std::vector<sm::TunnelRing> rings;
+            winrt::com_ptr<ID2D1Bitmap1> grid;    // the grid animations, a pixel a cell
+            winrt::com_ptr<ID2D1Bitmap1> layer;   // the falling characters, drawn when they step
+            winrt::com_ptr<ID2D1Bitmap1> glyphs;  // the characters they fall in, white, side by side
+            winrt::com_ptr<IDWriteTextFormat> glyphFormat;
+            float glyphWidth = 0.0f;
+            float glyphHeight = 0.0f;
+            winrt::com_ptr<ID2D1RadialGradientBrush> glow;  // where the tunnel leads
+        };
+        BackdropState backdrop_;
     };
 }

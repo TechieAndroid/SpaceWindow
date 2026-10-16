@@ -5,7 +5,8 @@
 .DESCRIPTION
     1. Finds Visual Studio 2026 (or Build Tools) with the C++ WinUI components.
     2. Restores the NuGet packages listed in the packages.config files.
-    3. Optionally runs MSVC code analysis and clang-tidy.
+    3. Optionally runs MSVC code analysis and clang-tidy, and checks the
+       sources' formatting against .clang-format.
     4. Builds the core library, the unit tests and the WinUI app.
     5. Runs the unit tests (when the target platform matches this machine),
        and optionally runs them again under AddressSanitizer.
@@ -16,7 +17,7 @@
 .EXAMPLE
     .\build.ps1                    # Release x64: build, test, publish
 .EXAMPLE
-    .\build.ps1 -All               # ... plus code analysis, clang-tidy and ASan
+    .\build.ps1 -All               # ... plus code analysis, clang-tidy, clang-format and ASan
 .EXAMPLE
     .\build.ps1 -Platform ARM64    # cross-compile for Windows on Arm
 #>
@@ -24,7 +25,7 @@
 param(
     [ValidateSet('x64', 'ARM64')] [string] $Platform = 'x64',
     [ValidateSet('Release', 'Debug')] [string] $Configuration = 'Release',
-    [switch] $Analyze,     # MSVC /analyze + clang-tidy; fails on any finding
+    [switch] $Analyze,     # MSVC /analyze, clang-tidy and clang-format; fails on any finding
     [switch] $Sanitize,    # build and run the unit tests under AddressSanitizer (x64)
     [switch] $NoPublish,
     [switch] $All
@@ -81,13 +82,26 @@ foreach ($config in 'src\Core', 'src\App', 'tests\CoreTests') {
 # build rather than an /analyze one.
 if ($Analyze) {
     Step 'MSVC code analysis (/analyze, Native Recommended Rules)'
-    # The projects compile with /WX, which turns every analysis warning into an error.
+    # The projects compile with /WX, but that leaves some analysis warnings
+    # (the C++ Core Check ones, C26xxx) warnings: any warning fails the step.
     Invoke-MSBuild (Join-Path $root 'SpaceWindow.slnx') 'Release' 'x64' @('/t:Rebuild', '/p:RunCodeAnalysis=true',
-        '/p:CodeAnalysisRuleSet=NativeRecommendedRules.ruleset')
+        '/p:CodeAnalysisRuleSet=NativeRecommendedRules.ruleset') | Tee-Object -Variable lines | ForEach-Object { Write-Host $_ }
+    $findings = @($lines | Where-Object { "$_" -match ': warning C\d{4,5}:' } | Sort-Object -Unique)
+    if ($findings.Count -gt 0) { throw "Code analysis reported $($findings.Count) finding(s)." }
 
     Step 'clang-tidy'
     & (Join-Path $root 'tools\Run-ClangTidy.ps1') -Root $root
     if ($LASTEXITCODE -ne 0) { throw 'clang-tidy reported findings.' }
+
+    Step 'clang-format (the style of .clang-format)'
+    $format = Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-format.exe'
+    if (-not (Test-Path $format)) { throw 'Visual Studio with the "C++ Clang tools" component is required.' }
+    # ChromeThemeKeys.h is generated (tools\make_theme_keys.py).
+    $sources = Get-ChildItem (Join-Path $root 'src'), (Join-Path $root 'tests') -Include *.cpp, *.h -Recurse |
+        Where-Object { $_.Name -ne 'ChromeThemeKeys.h' }
+    & $format --dry-run --Werror --style=file @($sources.FullName)
+    if ($LASTEXITCODE -ne 0) { throw 'Some files are not formatted as .clang-format says: run clang-format -i on them.' }
+    Write-Host "    $($sources.Count) files as .clang-format says"
 }
 
 # ---------------------------------------------------------------- build

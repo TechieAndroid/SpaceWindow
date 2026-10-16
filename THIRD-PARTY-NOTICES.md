@@ -4,6 +4,20 @@ SpaceWindow is based on SpaceMonger 1.4.0 by Sean Werkema; that copyright
 and license notice is in [LICENSE.txt](LICENSE.txt). SpaceWindow also uses
 the following.
 
+## Background animations
+
+The background animations were written for SpaceWindow; these are where they
+come from.
+
+- **DOOM Fire** follows the PSX DOOM fire as described by Fabien Sanglard in
+  ["How DOOM fire was done"](https://fabiensanglard.net/doom_fire_psx/),
+  including its 37 colours, and as played in a terminal by
+  [kiedtl/fire](https://github.com/kiedtl/fire) (MIT License) and the
+  [ly](https://github.com/fairyglade/ly) display manager (WTFPL).
+- **Colour Mix** is a port of the folding pattern, and takes the red, blue and
+  black, of ly's `colormix` animation (WTFPL); **Matrix** and **Game of
+  Life** follow its `matrix` and `gameoflife` animations.
+
 ## Dracula Theme
 
 The colours of SpaceWindow's built-in **Dracula** and **Alucard** themes are

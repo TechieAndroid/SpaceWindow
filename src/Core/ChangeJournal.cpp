@@ -2,16 +2,21 @@
 #include "pch.h"
 #include "ChangeJournal.h"
 
+#include "Fields.h"
 #include "Ntfs.h"
 
 namespace sm
 {
     namespace
     {
-        // With more changed files than this, scanning the volume again is about as quick.
-        constexpr std::size_t kMaxChangedFiles = 200'000;
+        using fields::At;
+        using ntfs::Record32;
+
+        // With more changed files than this, scanning the volume again is about
+        // as quick - and the changes are applied on the window's thread, where
+        // a large update holds the window up for a moment.
+        constexpr std::size_t kMaxChangedFiles = 50'000;
         constexpr std::size_t kReadBufferBytes = std::size_t{ 256 } * 1024;
-        constexpr std::size_t kMaxDepth = std::size_t{ 1 } << 20;  // guards walks up a tree against damaged links
 
         // USN_RECORD_V2, the journal entry format read here.
         constexpr std::size_t kEntryLength = 0x00;
@@ -26,54 +31,19 @@ namespace sm
         // A journal page: entries never straddle one, so each starts with an entry.
         constexpr std::int64_t kJournalPage = 4096;
 
-        template <typename T>
-        T At(std::span<std::byte const> bytes, std::size_t offset) noexcept
+        bool IsLarge(Entry const& entry) noexcept
         {
-            T value{};
-            if (offset <= bytes.size() && bytes.size() - offset >= sizeof(T))
-            {
-                std::memcpy(&value, bytes.data() + offset, sizeof(T));
-            }
-            return value;
+            return entry.kind == EntryKind::File && entry.record != 0 &&
+                   (entry.size >= kLargeFile || entry.logicalSize >= kLargeFile);
         }
 
-        // A record number as a tree stores it; nothing if it does not fit.
-        std::optional<std::uint32_t> Record32(std::uint64_t record) noexcept
-        {
-            if (record > UINT32_MAX)
-            {
-                return std::nullopt;
-            }
-            return static_cast<std::uint32_t>(record);
-        }
-
-        // Every folder of a tree read from an MFT, by record number.  A plain
+        // A tree's folders by record number (JournalIndex::folders).  A plain
         // array: record numbers are dense, and a drive has hundreds of
-        // thousands of folders to index on every rescan.
+        // thousands of folders.
         class FolderIndex
         {
         public:
-            explicit FolderIndex(Folder& root)
-            {
-                Set(static_cast<std::uint32_t>(ntfs::kRootRecord), &root);
-                std::vector<Folder*> pending{ &root };
-                while (!pending.empty())
-                {
-                    Folder const* const folder = pending.back();
-                    pending.pop_back();
-                    for (Entry const& entry : folder->entries)
-                    {
-                        if (entry.child)
-                        {
-                            if (entry.record != 0)
-                            {
-                                Set(entry.record, entry.child.get());
-                            }
-                            pending.push_back(entry.child.get());
-                        }
-                    }
-                }
-            }
+            explicit FolderIndex(std::vector<Folder*>& folders) noexcept : folders_(folders) {}
 
             Folder* Find(std::uint32_t record) const noexcept
             {
@@ -90,59 +60,86 @@ namespace sm
             }
 
         private:
-            std::vector<Folder*> folders_;
+            std::vector<Folder*>& folders_;
         };
 
-        // Is `folder` the folder `ancestor`, or inside it?
-        bool IsWithin(Folder const* folder, Folder const* ancestor) noexcept
+        // The tree's journal index; built first, with a walk of the whole
+        // tree, if it has none (it was not read from a master file table, or
+        // changed since in a way that dropped it).
+        JournalIndex& IndexOf(FolderTree& tree)
         {
-            for (std::size_t steps = 0; folder != nullptr && steps < kMaxDepth; ++steps, folder = folder->parent)
+            if (!tree.journalIndex)
             {
-                if (folder == ancestor)
-                {
-                    return true;
-                }
+                JournalIndex index;
+                FolderIndex folders(index.folders);
+                Folder* const root = tree.Root();
+                folders.Set(tree.rootRecord != 0 ? tree.rootRecord : static_cast<std::uint32_t>(ntfs::kRootRecord),
+                            root);
+                ForEachFolder(*root, [&](Folder const& folder) {
+                    for (Entry const& entry : folder.entries)
+                    {
+                        if (entry.child)
+                        {
+                            if (entry.record != 0)
+                            {
+                                folders.Set(entry.record, entry.child.get());
+                            }
+                        }
+                        else if (IsLarge(entry))
+                        {
+                            index.largeFiles.push_back(entry.record);
+                        }
+                    }
+                });
+                std::ranges::sort(index.largeFiles);
+                index.largeFiles.erase(std::ranges::unique(index.largeFiles).begin(), index.largeFiles.end());
+                tree.journalIndex = std::move(index);
             }
-            return false;
+            return *tree.journalIndex;
         }
 
         // Folders taken out of a tree, by record, until they go back in; and
         // any second copy of one (only a damaged tree would have that), kept
-        // until the end because the folder map may still point to it.
+        // until the end because the folder index may still point to it.
         struct Loose
         {
             std::unordered_map<std::uint32_t, std::unique_ptr<Folder>> folders;
-            std::vector<std::unique_ptr<Folder>> extra;
+            std::vector<std::pair<std::uint32_t, std::unique_ptr<Folder>>> extra;
         };
 
-        // Takes the entries of file `record` out of `folder`.  A folder taken
-        // out keeps its contents, to be put back where it is now.
-        bool TakeOut(Folder& folder, std::uint32_t record, Loose& loose)
+        // Takes the entries of the files `records` (sorted) out of `folder`,
+        // in one pass however many there are.  A folder taken out keeps its
+        // contents, to be put back where it is now.
+        bool TakeOut(Folder& folder, std::span<std::uint32_t const> records, Loose& loose)
         {
+            auto const listed = [records](Entry const& entry) {
+                return entry.record != 0 && !entry.IsSpecial() && std::ranges::binary_search(records, entry.record);
+            };
             bool found = false;
             for (Entry& entry : folder.entries)
             {
-                if (entry.record == record && !entry.IsSpecial())
+                if (!listed(entry))
                 {
-                    found = true;
-                    if (entry.child)
+                    continue;
+                }
+                found = true;
+                if (entry.child)
+                {
+                    entry.child->parent = nullptr;
+                    std::unique_ptr<Folder>& slot = loose.folders[entry.record];
+                    if (slot)
                     {
-                        entry.child->parent = nullptr;
-                        std::unique_ptr<Folder>& slot = loose.folders[record];
-                        if (slot)
-                        {
-                            loose.extra.push_back(std::move(entry.child));
-                        }
-                        else
-                        {
-                            slot = std::move(entry.child);
-                        }
+                        loose.extra.emplace_back(entry.record, std::move(entry.child));
+                    }
+                    else
+                    {
+                        slot = std::move(entry.child);
                     }
                 }
             }
             if (found)
             {
-                std::erase_if(folder.entries, [record](Entry const& entry) { return entry.record == record && !entry.IsSpecial(); });
+                std::erase_if(folder.entries, listed);
             }
             return found;
         }
@@ -175,19 +172,6 @@ namespace sm
             folder.entries.push_back(std::move(entry));
         }
 
-        // How deep a folder is below `root` (the root itself: 0); nothing if it is not below it.
-        std::optional<std::size_t> Depth(Folder const* folder, Folder const* root) noexcept
-        {
-            for (std::size_t depth = 0; folder != nullptr && depth < kMaxDepth; ++depth, folder = folder->parent)
-            {
-                if (folder == root)
-                {
-                    return depth;
-                }
-            }
-            return std::nullopt;
-        }
-
         // The name a file's space is counted under, as CountHardLinksOnce
         // chooses it: the one nearest the root, then in the folder with the
         // lowest record, then the lowest.  Nothing if none of its folders is in the tree.
@@ -197,7 +181,8 @@ namespace sm
             std::size_t countedDepth = 0;
             for (std::size_t i = 0; i < file.names.size(); ++i)
             {
-                std::optional<std::size_t> const depth = Depth(folders.Find(file.names[i].first), root);
+                Folder const* const folder = folders.Find(file.names[i].first);
+                std::optional<std::size_t> const depth = folder != nullptr ? folder->LevelsBelow(root) : std::nullopt;
                 if (depth && (!counted || *depth < countedDepth ||
                               (*depth == countedDepth && file.names[i] < file.names[*counted])))
                 {
@@ -260,6 +245,24 @@ namespace sm
             }
             folder.names = std::move(names);
         }
+
+        // A folder about to be freed, and everything in it, out of the index.
+        void Forget(FolderIndex& folders, std::uint32_t record, Folder& gone)
+        {
+            if (folders.Find(record) == &gone)
+            {
+                folders.Set(record, nullptr);
+            }
+            ForEachFolder(gone, [&folders](Folder const& folder) {
+                for (Entry const& entry : folder.entries)
+                {
+                    if (entry.child && entry.record != 0 && folders.Find(entry.record) == entry.child.get())
+                    {
+                        folders.Set(entry.record, nullptr);
+                    }
+                }
+            });
+        }
     }
 
     std::optional<JournalPosition> CurrentJournalPosition(ntfs::Volume const& volume)
@@ -282,8 +285,8 @@ namespace sm
         USN_JOURNAL_DATA_V0 journal{};
         DWORD returned = 0;
         if (!volume ||
-            !DeviceIoControl(volume->Handle(), FSCTL_QUERY_USN_JOURNAL, nullptr, 0, &journal, sizeof(journal), &returned,
-                             nullptr) ||
+            !DeviceIoControl(volume->Handle(), FSCTL_QUERY_USN_JOURNAL, nullptr, 0, &journal, sizeof(journal),
+                             &returned, nullptr) ||
             journal.UsnJournalID != from.journalId || from.nextUsn < journal.LowestValidUsn)
         {
             return result;  // a new journal, or one that has dropped entries since `from`
@@ -302,7 +305,8 @@ namespace sm
         read.StartUsn = from.nextUsn;
         if (lookbackBytes > 0)
         {
-            read.StartUsn = std::max(journal.LowestValidUsn, (from.nextUsn - lookbackBytes) / kJournalPage * kJournalPage);
+            read.StartUsn =
+                std::max(journal.LowestValidUsn, (from.nextUsn - lookbackBytes) / kJournalPage * kJournalPage);
         }
         read.ReasonMask = 0xFFFFFFFF;
         read.UsnJournalID = journal.UsnJournalID;
@@ -331,10 +335,13 @@ namespace sm
                     break;
                 }
                 if (At<std::uint16_t>(view, offset + kEntryMajorVersion) == 2 &&
-                    (At<USN>(view, offset + kEntryUsn) >= from.nextUsn || At<std::uint64_t>(view, offset + kEntryTime) >= recentSince))
+                    (At<USN>(view, offset + kEntryUsn) >= from.nextUsn ||
+                     At<std::uint64_t>(view, offset + kEntryTime) >= recentSince))
                 {
-                    std::optional<std::uint32_t> const file = Record32(ntfs::RecordOf(At<std::uint64_t>(view, offset + kEntryFile)));
-                    std::optional<std::uint32_t> const folder = Record32(ntfs::RecordOf(At<std::uint64_t>(view, offset + kEntryParent)));
+                    std::optional<std::uint32_t> const file =
+                        Record32(ntfs::RecordOf(At<std::uint64_t>(view, offset + kEntryFile)));
+                    std::optional<std::uint32_t> const folder =
+                        Record32(ntfs::RecordOf(At<std::uint64_t>(view, offset + kEntryParent)));
                     if (!file || !folder)
                     {
                         return result;  // record numbers beyond what a tree stores
@@ -453,30 +460,13 @@ namespace sm
         return result;
     }
 
-    std::vector<std::uint32_t> LargeFiles(Folder const& root, std::uint64_t threshold)
+    std::vector<std::uint32_t> LargeFiles(FolderTree& tree)
     {
-        std::vector<std::uint32_t> large;
-        std::vector<Folder const*> pending{ &root };
-        while (!pending.empty())
+        if (tree.Root() == nullptr)
         {
-            Folder const* const folder = pending.back();
-            pending.pop_back();
-            for (Entry const& entry : folder->entries)
-            {
-                if (entry.child)
-                {
-                    pending.push_back(entry.child.get());
-                }
-                else if (entry.kind == EntryKind::File && entry.record != 0 &&
-                         (entry.size >= threshold || entry.logicalSize >= threshold))
-                {
-                    large.push_back(entry.record);
-                }
-            }
+            return {};
         }
-        std::ranges::sort(large);
-        large.erase(std::ranges::unique(large).begin(), large.end());
-        return large;
+        return IndexOf(tree).largeFiles;
     }
 
     void ApplyJournalChanges(FolderTree& tree, JournalChanges const& changes)
@@ -486,7 +476,8 @@ namespace sm
         {
             return;
         }
-        FolderIndex folders(*root);
+        JournalIndex& index = IndexOf(tree);
+        FolderIndex folders(index.folders);
         Loose loose;
         std::vector<Folder*> touched;  // folders whose entries changed (some more than once)
 
@@ -501,22 +492,35 @@ namespace sm
             }
         }
 
-        // Take every changed file out of the folders it may be listed in.
+        // Take every changed file out of the folders it may be listed in:
+        // each of those folders gone through once, for all its files - in
+        // record order, so the tree comes out the same every time.
+        std::map<std::uint32_t, std::vector<std::uint32_t>> outOf;  // folder record, file records
         for (ChangedFile const* const file : files)
         {
-            auto const takeOut = [&](std::uint32_t record) {
-                if (Folder* const found = folders.Find(record); found != nullptr && TakeOut(*found, file->record, loose))
+            auto const from = [&](std::uint32_t record) {
+                if (folders.Find(record) != nullptr)
                 {
-                    touched.push_back(found);
+                    outOf[record].push_back(file->record);
                 }
             };
             for (std::uint32_t const folder : file->formerFolders)
             {
-                takeOut(folder);
+                from(folder);
             }
             for (auto const& [folder, name] : file->names)
             {
-                takeOut(folder);
+                from(folder);
+            }
+        }
+        for (auto& [record, records] : outOf)
+        {
+            Folder* const folder = folders.Find(record);  // NOLINT(misc-const-correctness): its entries go
+            std::ranges::sort(records);
+            records.erase(std::ranges::unique(records).begin(), records.end());
+            if (TakeOut(*folder, records, loose))
+            {
+                touched.push_back(folder);
             }
         }
 
@@ -535,7 +539,8 @@ namespace sm
                 // Not found where the journal said: if the tree has it elsewhere, take it from there.
                 if (Folder const* const found = folders.Find(file->record); found != nullptr && found != root)
                 {
-                    if (Folder* const parent = found->parent; parent != nullptr && TakeOut(*parent, file->record, loose))
+                    std::array<std::uint32_t, 1> const record{ file->record };
+                    if (Folder* const parent = found->parent; parent != nullptr && TakeOut(*parent, record, loose))
                     {
                         touched.push_back(parent);
                     }
@@ -556,7 +561,7 @@ namespace sm
             auto const& [parentRecord, name] = file->names.front();
             Folder* const parent = folders.Find(parentRecord);
             std::unique_ptr<Folder>& folder = loose.folders[file->record];
-            if (parent == nullptr || !folder || IsWithin(parent, folder.get()))
+            if (parent == nullptr || !folder || parent->IsWithin(folder.get()))
             {
                 continue;
             }
@@ -565,14 +570,19 @@ namespace sm
         }
 
         // Files: one entry per name.  A hard-linked file is listed in each of
-        // its folders but counted once (CountedName).
+        // its folders but counted once (CountedName).  The large ones are
+        // noted for the next reload.
+        std::vector<std::uint32_t> changedFiles;
+        std::vector<std::uint32_t> largeNow;
         for (ChangedFile const* const file : files)
         {
+            changedFiles.push_back(file->record);
             if (!file->exists || file->directory || file->alias)
             {
                 continue;
             }
             std::optional<std::size_t> const counted = CountedName(*file, folders, root);
+            std::size_t listed = 0;
             for (std::size_t i = 0; i < file->names.size(); ++i)
             {
                 auto const& [folder, name] = file->names[i];
@@ -580,9 +590,22 @@ namespace sm
                 {
                     AddEntry(*found, *file, name, nullptr, i == counted);
                     touched.push_back(found);
+                    ++listed;
                 }
             }
+            tree.hardLinks = tree.hardLinks || listed > 1;
+            if (listed != 0 && (file->size >= kLargeFile || file->length >= kLargeFile))
+            {
+                largeNow.push_back(file->record);
+            }
         }
+        std::ranges::sort(changedFiles);
+        std::ranges::sort(largeNow);
+        std::vector<std::uint32_t> large;
+        large.reserve(index.largeFiles.size() + largeNow.size());
+        std::ranges::set_difference(index.largeFiles, changedFiles, std::back_inserter(large));
+        index.largeFiles.clear();
+        std::ranges::set_union(large, largeNow, std::back_inserter(index.largeFiles));
 
         // New totals for every changed folder still in the tree and the folders above it.
         std::unordered_set<Folder*> compacted;
@@ -595,7 +618,19 @@ namespace sm
         }
         UpdateTotalsUpward(*root, touched);
 
-        loose = {};  // what is left was deleted, or moved off the tree
+        // What is left was deleted, or moved off the tree.
+        for (auto& [record, folder] : loose.folders)
+        {
+            if (folder)
+            {
+                Forget(folders, record, *folder);
+            }
+        }
+        for (auto& [record, folder] : loose.extra)
+        {
+            Forget(folders, record, *folder);
+        }
+        loose = {};
         tree.journal = changes.position;
         tree.RefreshFreeSpace();
     }

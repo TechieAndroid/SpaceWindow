@@ -2,6 +2,8 @@
 #include "pch.h"
 #include "Theme.h"
 
+#include "Text.h"
+
 namespace sm
 {
     namespace
@@ -113,7 +115,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
         struct ColorSetting
         {
             std::wstring_view key;
-            std::optional<Rgb> ThemeFile::*field;
+            std::optional<Rgb> ThemeFile::* field;
         };
 
         constexpr std::array<ColorSetting, 7> kWindowSettings{ {
@@ -141,16 +143,6 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             L"white", L"light-gray", L"dark-gray", L"red", L"orange", L"yellow", L"green", L"aqua", L"blue", L"violet",
         };
 
-        std::wstring Concat(std::initializer_list<std::wstring_view> parts)
-        {
-            std::wstring result;
-            for (std::wstring_view const part : parts)
-            {
-                result.append(part);
-            }
-            return result;
-        }
-
         std::wstring_view Trim(std::wstring_view text) noexcept
         {
             constexpr std::wstring_view kSpace = L" \t\r﻿";
@@ -173,12 +165,6 @@ grouped = #8F8D85           ; halfway between Background and Foreground
                 }
             }
             return result;
-        }
-
-        bool SameId(std::wstring_view a, std::wstring_view b) noexcept
-        {
-            return CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()),
-                                        TRUE) == CSTR_EQUAL;
         }
 
         int HexDigit(wchar_t c) noexcept
@@ -223,7 +209,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
 
         std::wstring NotAColor(std::wstring_view value)
         {
-            return Concat({ L"'", value, L"' is not a colour (write colours as #RRGGBB)" });
+            return Join(L"'", value, L"' is not a colour (write colours as #RRGGBB)");
         }
 
         Theme ClassicTheme(wchar_t const* id, ThemeBase base)
@@ -254,7 +240,8 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             std::string bytes(static_cast<std::size_t>(size.QuadPart), '\0');
             DWORD read = 0;
             if (!bytes.empty() &&
-                (!ReadFile(file.get(), bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) || read != bytes.size()))
+                (!ReadFile(file.get(), bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) ||
+                 read != bytes.size()))
             {
                 error = L"cannot be read";
                 return std::nullopt;
@@ -280,8 +267,8 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             {
                 return std::wstring();
             }
-            int const length =
-                MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+            int const length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
+                                                   static_cast<int>(utf8.size()), nullptr, 0);
             if (length <= 0)
             {
                 error = L"is not UTF-8 or UTF-16 text";
@@ -309,15 +296,12 @@ grouped = #8F8D85           ; halfway between Background and Foreground
                 // "*.ini" also matches longer extensions through 8.3 names.
                 std::wstring_view const name(data.cFileName);
                 if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 && name.size() > 4 &&
-                    SameId(name.substr(name.size() - 4), L".ini"))
+                    EqualsIgnoringCase(name.substr(name.size() - 4), L".ini"))
                 {
                     names.emplace_back(name);
                 }
             } while (FindNextFileW(find.get(), &data));
-            std::ranges::sort(names, [](std::wstring const& a, std::wstring const& b) {
-                return CompareStringOrdinal(a.c_str(), static_cast<int>(a.size()), b.c_str(), static_cast<int>(b.size()),
-                                            TRUE) == CSTR_LESS_THAN;
-            });
+            std::ranges::sort(names, LessIgnoringCase);
             return names;
         }
     }
@@ -357,7 +341,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
         int lineNumber = 0;
         auto const fail = [&error, &lineNumber](std::wstring_view message) {
             std::wstring const number = std::to_wstring(lineNumber);
-            error = Concat({ L"line ", number, L": ", message });
+            error = Join(L"line ", number, L": ", message);
             return std::optional<Theme>();
         };
 
@@ -387,7 +371,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
                 section = Lower(Trim(line.substr(1, line.size() - 2)));
                 if (section != L"window" && section != L"map")
                 {
-                    return fail(Concat({ L"unknown section [", section, L"] (the sections are [window] and [map])" }));
+                    return fail(Join(L"unknown section [", section, L"] (the sections are [window] and [map])"));
                 }
                 continue;
             }
@@ -401,7 +385,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             std::wstring_view const value = Trim(line.substr(equals + 1));
             if (value.empty())
             {
-                return fail(Concat({ L"'", key, L"' has no value" }));
+                return fail(Join(L"'", key, L"' has no value"));
             }
 
             if (section.empty())
@@ -425,13 +409,14 @@ grouped = #8F8D85           ; halfway between Background and Foreground
                 }
                 else
                 {
-                    return fail(Concat({ L"unknown setting '", key, L"' (before the sections come 'name' and 'base')" }));
+                    return fail(Join(L"unknown setting '", key, L"' (before the sections come 'name' and 'base')"));
                 }
                 continue;
             }
 
-            std::span<ColorSetting const> const settings =
-                section == L"window" ? std::span<ColorSetting const>(kWindowSettings) : std::span<ColorSetting const>(kMapSettings);
+            std::span<ColorSetting const> const settings = section == L"window"
+                                                               ? std::span<ColorSetting const>(kWindowSettings)
+                                                               : std::span<ColorSetting const>(kMapSettings);
             auto const fixed = std::ranges::find(kFixedKeys, std::wstring_view(key));
             if (auto const setting = std::ranges::find(settings, std::wstring_view(key), &ColorSetting::key);
                 setting != settings.end())
@@ -485,7 +470,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             }
             else
             {
-                return fail(Concat({ L"unknown setting '", key, L"' in [", section, L"]" }));
+                return fail(Join(L"unknown setting '", key, L"' in [", section, L"]"));
             }
         }
 
@@ -567,10 +552,10 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             for (std::wstring const& name : ThemeFiles(folder))
             {
                 std::wstring_view const id = std::wstring_view(name).substr(0, name.size() - 4);  // without ".ini"
-                std::wstring const path = Concat({ folder, L"\\", name });
-                if (std::ranges::any_of(themes, [id](Theme const& theme) { return SameId(theme.id, id); }))
+                std::wstring const path = Join(folder, L"\\", name);
+                if (std::ranges::any_of(themes, [id](Theme const& theme) { return EqualsIgnoringCase(theme.id, id); }))
                 {
-                    errors.push_back(Concat({ path, L": not used, there is already a theme called \"", id, L"\"" }));
+                    errors.push_back(Join(path, L": not used, there is already a theme called \"", id, L"\""));
                     continue;
                 }
                 std::wstring error;
@@ -578,7 +563,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
                 std::optional<Theme> theme = text ? ParseTheme(*text, id, error) : std::nullopt;
                 if (!theme)
                 {
-                    errors.push_back(Concat({ path, L": ", error }));
+                    errors.push_back(Join(path, L": ", error));
                     continue;
                 }
                 themes.push_back(std::move(*theme));
@@ -591,7 +576,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
     {
         for (Theme const& theme : themes)
         {
-            if (SameId(theme.id, id))
+            if (EqualsIgnoringCase(theme.id, id))
             {
                 return theme;
             }

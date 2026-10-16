@@ -35,12 +35,26 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace sm
 {
     struct Folder;
     class FolderWatch;
+
+    // Junctions, directory and file symbolic links, and volume mount points
+    // are "name surrogates": aliases for data that lives somewhere else.
+    // Following them would count that data twice and can loop forever, so
+    // both scanners skip them, as 1.4.0 did.  Other reparse points (OneDrive
+    // placeholders, deduplicated or WOF-compressed files, app execution
+    // aliases) hold real data and are measured normally.
+    constexpr bool IsAlias(std::uint32_t attributes, std::uint32_t reparseTag) noexcept
+    {
+        constexpr std::uint32_t kReparsePoint = 0x400;        // FILE_ATTRIBUTE_REPARSE_POINT
+        constexpr std::uint32_t kNameSurrogate = 0x20000000;  // what IsReparseTagNameSurrogate tests
+        return (attributes & kReparsePoint) != 0 && (reparseTag & kNameSurrogate) != 0;
+    }
 
     enum class EntryKind : std::uint8_t
     {
@@ -52,12 +66,12 @@ namespace sm
 
     struct Entry
     {
-        std::uint64_t size = 0;         // bytes allocated on disk (a folder: everything below it)
-        std::uint64_t logicalSize = 0;  // file length (a folder: everything below it)
+        std::uint64_t size = 0;           // bytes allocated on disk (a folder: everything below it)
+        std::uint64_t logicalSize = 0;    // file length (a folder: everything below it)
         std::uint64_t lastWriteTime = 0;  // FILETIME, UTC
-        std::uint32_t attributes = 0;   // FILE_ATTRIBUTE_*
-        std::uint32_t nameOffset = 0;   // offset of the name in Folder::names
-        std::uint16_t nameLength = 0;   // length of the name in UTF-16 code units
+        std::uint32_t attributes = 0;     // FILE_ATTRIBUTE_*
+        std::uint32_t nameOffset = 0;     // offset of the name in Folder::names
+        std::uint16_t nameLength = 0;     // length of the name in UTF-16 code units
         EntryKind kind = EntryKind::File;
         bool countedElsewhere = false;  // a hard link whose file's space is counted under another of its names
         std::uint32_t record = 0;       // NTFS master file table record (0: unknown)
@@ -80,9 +94,9 @@ namespace sm
         Folder& operator=(Folder&&) = delete;
 
         Folder* parent = nullptr;
-        std::uint32_t indexInParent = 0;   // index of this folder's entry in parent->entries
-        std::vector<Entry> entries;        // largest first, once the folder is finalized
-        std::wstring names;                // the names of all entries, back to back
+        std::uint32_t indexInParent = 0;  // index of this folder's entry in parent->entries
+        std::vector<Entry> entries;       // largest first, once the folder is finalized
+        std::wstring names;               // the names of all entries, back to back
 
         std::uint64_t sizeFiles = 0;       // on-disk bytes of the files directly in this folder
         std::uint64_t sizeSubfolders = 0;  // on-disk bytes of all sub-folders, recursively
@@ -103,7 +117,47 @@ namespace sm
             return { names.data() + entry.nameOffset, entry.nameLength };
         }
         std::wstring_view Name(std::size_t index) const noexcept { return Name(entries[index]); }
+
+        // How many levels below `ancestor` this folder is (0: it is
+        // `ancestor`); nothing if it is not inside it.
+        std::optional<std::size_t> LevelsBelow(Folder const* ancestor) const noexcept;
+
+        // This folder is `ancestor`, or inside it.
+        bool IsWithin(Folder const* ancestor) const noexcept { return LevelsBelow(ancestor).has_value(); }
     };
+
+    // Calls `visit` for `root` and for every folder below it, each before what
+    // it holds, without recursion (trees can be thousands of levels deep).
+    // When `visit` returns a bool, false passes over what that folder holds.
+    // `F` is Folder or Folder const.
+    template <typename F, typename Visit>
+    void ForEachFolder(F& root, Visit&& visit)
+    {
+        std::vector<F*> pending{ &root };
+        while (!pending.empty())
+        {
+            F* const folder = pending.back();  // NOLINT(misc-const-correctness): F decides
+            pending.pop_back();
+            if constexpr (std::is_same_v<std::invoke_result_t<Visit&, F&>, bool>)
+            {
+                if (!visit(*folder))
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                visit(*folder);
+            }
+            for (auto const& entry : folder->entries)
+            {
+                if (entry.child)
+                {
+                    pending.push_back(entry.child.get());
+                }
+            }
+        }
+    }
 
     // Re-sorts a folder's entries, largest first, and re-links the children.
     void SortEntries(Folder& folder);
@@ -118,13 +172,13 @@ namespace sm
 
     struct VolumeInfo
     {
-        std::wstring root;                 // mount point, e.g. L"C:\\" (empty if unknown)
+        std::wstring root;  // mount point, e.g. L"C:\\" (empty if unknown)
         std::uint64_t totalBytes = 0;
         std::uint64_t freeBytes = 0;
         std::uint64_t clusterSize = 0;
-        std::wstring fileSystem;           // L"NTFS", L"ReFS", ... (empty if unknown)
+        std::wstring fileSystem;  // L"NTFS", L"ReFS", ... (empty if unknown)
         bool remote = false;
-        std::optional<bool> seekPenalty;   // true for spinning disks, unknown for network/virtual volumes
+        std::optional<bool> seekPenalty;  // true for spinning disks, unknown for network/virtual volumes
 
         std::uint64_t UsedBytes() const noexcept { return totalBytes > freeBytes ? totalBytes - freeBytes : 0; }
     };
@@ -161,8 +215,8 @@ namespace sm
 
     struct ScanOptions
     {
-        unsigned threads = 0;       // 0: choose from the kind of storage
-        bool addFreeSpace = true;   // add the free/unscanned pseudo-entries when scanning a whole drive
+        unsigned threads = 0;         // 0: choose from the kind of storage
+        bool addFreeSpace = true;     // add the free/unscanned pseudo-entries when scanning a whole drive
         bool masterFileTable = true;  // read a whole NTFS drive's master file table, when allowed (Ntfs.h)
         bool watch = false;           // when listing folders: watch them for changes, from the start (FolderWatch.h)
     };
@@ -183,6 +237,15 @@ namespace sm
         // Files changed and not closed since: the journal names a file once
         // until it is closed, so these are read again on every rescan.
         std::vector<std::uint32_t> openFiles;
+    };
+
+    // What a reload from the change journal keeps for the next one, so that
+    // reloads need not walk the whole tree (ChangeJournal.cpp): every folder
+    // by record, and the records of the large files.
+    struct JournalIndex
+    {
+        std::vector<Folder*> folders;           // by record (Entry::record); null where no folder has it
+        std::vector<std::uint32_t> largeFiles;  // sorted (LargeFiles)
     };
 
     class FolderTree
@@ -208,6 +271,15 @@ namespace sm
         // apply the volume's change journal instead of scanning again.
         std::optional<JournalPosition> journal;
 
+        // Built when a reload from the journal first needs it, and kept up to
+        // date by the next ones; any other change to the tree's folders drops it.
+        std::optional<JournalIndex> journalIndex;
+
+        // Some file may be listed under several names (CountHardLinksOnce).
+        // False only when none is: then names that go cannot leave the space
+        // of a file to be counted under another of its names.
+        bool hardLinks = false;
+
         // Set for a tree listed folder by folder (when asked for): which
         // folders changed since, so rescans list only those again.
         std::shared_ptr<FolderWatch> watch;
@@ -221,7 +293,7 @@ namespace sm
         std::vector<std::wstring> UnreadableFolders() const;
 
         // Full paths, built by walking up the tree (1.4.0 used recursion).
-        std::wstring PathOf(Folder const& folder) const;                       // ends with a backslash
+        std::wstring PathOf(Folder const& folder) const;  // ends with a backslash
         std::wstring PathOf(Folder const& folder, std::size_t index) const;
 
         // Removes an entry that was deleted from the disk and updates the totals
@@ -272,6 +344,14 @@ namespace sm
     using SizeLookup = std::function<std::optional<std::uint64_t>(Folder const& folder, std::size_t index)>;
     void CountHardLinksOnce(FolderTree& tree, SizeLookup const& lookup = {});
 
+    // The same for the files `records` (sorted) alone, whose names came or
+    // went: one walk of the tree, where counting every file takes two and a
+    // sort of every hard-linked file's names.
+    void CountHardLinksOnce(FolderTree& tree, std::span<std::uint32_t const> records, SizeLookup const& lookup = {});
+
+    // The records of the files below `folder`, sorted (for the call above).
+    std::vector<std::uint32_t> FileRecords(Folder const& folder);
+
     // The space a file takes on disk, from the file itself.
     std::optional<std::uint64_t> ReadSizeOnDisk(std::wstring const& path, std::uint32_t attributes);
 
@@ -301,12 +381,12 @@ namespace sm
         {
             Folder* folder = nullptr;  // a file whose listing lags behind it
             std::wstring name;
-            std::uint64_t size = 0;    // as it is, read from the file
+            std::uint64_t size = 0;  // as it is, read from the file
             std::uint64_t length = 0;
         };
         std::vector<Listing> listings;  // a sub-folder new to the tree is scanned whole: `listed` tells it
         std::vector<Grown> grown;
-        std::vector<std::wstring> growing;          // FolderTree::growingFiles to be
+        std::vector<std::wstring> growing;  // FolderTree::growingFiles to be
     };
 
     // Lists again the folders that changed and scans the folders new in them;

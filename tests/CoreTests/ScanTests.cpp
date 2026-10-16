@@ -17,8 +17,8 @@ namespace
 
     void WriteFileOfSize(std::wstring const& path, std::size_t size)
     {
-        wil::unique_hfile const file(
-            CreateFileW(Extended(path).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+        wil::unique_hfile const file(CreateFileW(Extended(path).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                                 FILE_ATTRIBUTE_NORMAL, nullptr));
         CHECK(static_cast<bool>(file));
         std::vector<char> const data(size, 'x');
         DWORD written = 0;
@@ -50,11 +50,11 @@ namespace
         };
         DWORD const tag = IO_REPARSE_TAG_MOUNT_POINT;
         std::memcpy(buffer.data(), &tag, sizeof(tag));
-        put16(4, 8 + pathBytes);                                         // ReparseDataLength
-        put16(8, 0);                                                     // SubstituteNameOffset
-        put16(10, substitute.size() * sizeof(wchar_t));                  // SubstituteNameLength
-        put16(12, (substitute.size() + 1) * sizeof(wchar_t));            // PrintNameOffset
-        put16(14, print.size() * sizeof(wchar_t));                       // PrintNameLength
+        put16(4, 8 + pathBytes);                               // ReparseDataLength
+        put16(8, 0);                                           // SubstituteNameOffset
+        put16(10, substitute.size() * sizeof(wchar_t));        // SubstituteNameLength
+        put16(12, (substitute.size() + 1) * sizeof(wchar_t));  // PrintNameOffset
+        put16(14, print.size() * sizeof(wchar_t));             // PrintNameLength
         std::memcpy(buffer.data() + 16, substitute.c_str(), (substitute.size() + 1) * sizeof(wchar_t));
         std::memcpy(buffer.data() + 16 + (substitute.size() + 1) * sizeof(wchar_t), print.c_str(),
                     (print.size() + 1) * sizeof(wchar_t));
@@ -397,7 +397,8 @@ TEST_CASE(ReloadReadsFilesKeptOpen)
 
     // A download in progress: a folder listing shows it as it was when last closed.
     wil::unique_hfile const download(CreateFileW(Extended(tree.Root() + L"download.part").c_str(), GENERIC_WRITE,
-                                                 FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+                                                 FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+                                                 nullptr));
     CHECK(static_cast<bool>(download));
     std::vector<char> const chunk(std::size_t{ 1 } << 20, 'x');
     auto const write = [&](int megabytes) {
@@ -603,8 +604,8 @@ TEST_CASE(ScanMeasuresFilesCompressedByWindows)
     std::wstring const path = tree.Root() + L"compact.txt";
     std::size_t const length = std::size_t{ 1 } << 20;
     {
-        wil::unique_hfile const file(
-            CreateFileW(Extended(path).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+        wil::unique_hfile const file(CreateFileW(Extended(path).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                                 FILE_ATTRIBUTE_NORMAL, nullptr));
         CHECK(static_cast<bool>(file));
         std::string text;
         while (text.size() < length)
@@ -625,7 +626,8 @@ TEST_CASE(ScanMeasuresFilesCompressedByWindows)
         } info{ { WOF_CURRENT_VERSION, WOF_PROVIDER_FILE },
                 { FILE_PROVIDER_CURRENT_VERSION, FILE_PROVIDER_COMPRESSION_XPRESS4K, 0 } };
         DWORD returned = 0;
-        if (!DeviceIoControl(file.get(), FSCTL_SET_EXTERNAL_BACKING, &info, sizeof(info), nullptr, 0, &returned, nullptr))
+        if (!DeviceIoControl(file.get(), FSCTL_SET_EXTERNAL_BACKING, &info, sizeof(info), nullptr, 0, &returned,
+                             nullptr))
         {
             return;  // not offered on this drive
         }
@@ -806,7 +808,7 @@ TEST_CASE(NormalizeScanPathCanonicalizes)
     CHECK(GetWindowsDirectoryW(windows, static_cast<UINT>(std::size(windows))) != 0);
     std::wstring const drive(windows, 2);  // "C:"
 
-    CHECK_EQ(sm::NormalizeScanPath(drive), drive + L"\\");                // the root, not the current directory
+    CHECK_EQ(sm::NormalizeScanPath(drive), drive + L"\\");  // the root, not the current directory
     CHECK_EQ(sm::NormalizeScanPath(L"  \"" + drive + L"\\Windows\\..\"  "), drive + L"\\");
     CHECK_EQ(sm::NormalizeScanPath(drive + L"/Windows/System32"), drive + L"\\Windows\\System32\\");
     CHECK_EQ(sm::NormalizeScanPath(L"\\\\?\\" + drive + L"\\Windows"), drive + L"\\Windows\\");
@@ -868,4 +870,57 @@ TEST_CASE(DeepTreesAreFreedWithoutRecursion)
     }
     root.reset();
     CHECK(root == nullptr);
+}
+
+TEST_CASE(ReloadKeepsHardLinksAndUnreadableFoldersAsAFreshScanWould)
+{
+    // A reload recounts only the hard links of the files whose names came or
+    // went, and keeps the count of unreadable folders without walking the
+    // tree: after each change, the tree must look like a fresh scan.
+    TestTree const tree;
+    sm::ScanProgress progress;
+    sm::ScanOptions options;
+    options.watch = true;
+    sm::ScanResult const result = sm::ScanFolder(tree.Root(), progress, std::stop_token{}, options);
+    CHECK(result.tree != nullptr && result.tree->watch != nullptr);
+    sm::FolderTree& scanned = *result.tree;
+    auto const reload = [&] {
+        Sleep(300);  // the watch records changes on a thread of its own
+        sm::FolderWatch::Changes const changes = scanned.watch->Take();
+        CHECK(changes.complete);
+        std::optional<sm::FolderReload> prepared =
+            sm::PrepareReload(scanned, changes.folders, changes.files, progress, std::stop_token{});
+        CHECK(prepared.has_value());
+        sm::ApplyReload(scanned, std::move(*prepared));
+        ExpectSameContents(scanned, tree.Root());
+        CheckConsistency(*scanned.Root());
+        CHECK_EQ(scanned.unreadableFolders, Scan(tree.Root()).tree->unreadableFolders);
+    };
+
+    // A second name for sub1\c.bin, nearer the root: the space goes with it.
+    if (!CreateHardLinkW(Extended(tree.Root() + L"c-link.bin").c_str(), Extended(tree.Root() + L"sub1\\c.bin").c_str(),
+                         nullptr))
+    {
+        return;  // the temporary folder is not on NTFS
+    }
+    reload();
+    CHECK(scanned.hardLinks);
+    // That name goes: the space comes back to sub1\c.bin, read from the file.
+    CHECK(DeleteFileW(Extended(tree.Root() + L"c-link.bin").c_str()));
+    reload();
+
+    // A folder nobody may list comes, and goes.
+    std::wstring const locked = tree.Root() + L"locked\\";
+    MakeDirectory(locked);
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    CHECK(ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(D;;0x1;;;WD)(A;;FA;;;WD)", SDDL_REVISION_1,
+                                                               &descriptor, nullptr));
+    BOOL const set = SetFileSecurityW(Extended(locked).c_str(), DACL_SECURITY_INFORMATION, descriptor);
+    LocalFree(descriptor);
+    CHECK(set);
+    reload();
+    CHECK_EQ(scanned.unreadableFolders, std::uint64_t{ 1 });
+    CHECK(RemoveDirectoryW(Extended(locked).c_str()));
+    reload();
+    CHECK_EQ(scanned.unreadableFolders, std::uint64_t{ 0 });
 }

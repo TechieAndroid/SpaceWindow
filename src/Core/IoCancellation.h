@@ -27,11 +27,13 @@ namespace sm
         ~IoCancellation() = default;
 
         // While it lives, a stop request cancels whatever synchronous I/O the
-        // thread that created it is blocked in.
+        // thread that created it is blocked in.  Best effort: a thread that
+        // cannot be enlisted (Windows is out of handles) runs all the same,
+        // and a stop waits for its I/O to end by itself.
         class Enlistment
         {
         public:
-            explicit Enlistment(IoCancellation& owner);
+            explicit Enlistment(IoCancellation& owner) noexcept;
             Enlistment(Enlistment const&) = delete;
             Enlistment& operator=(Enlistment const&) = delete;
             Enlistment(Enlistment&&) = delete;
@@ -59,7 +61,7 @@ namespace sm
         void CancelAll() noexcept;
 
         std::mutex mutex_;
-        std::vector<Thread> threads_;  // guarded by mutex_
+        std::vector<Thread> threads_;             // guarded by mutex_
         std::stop_callback<Canceller> callback_;  // last: it may run as soon as it is constructed
     };
 }

@@ -135,6 +135,7 @@
     <ClInclude Include="MainWindow.xaml.h">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="MainWindowShared.h" />
     <ClInclude Include="ShellOps.h" />
     <ClInclude Include="ChromeTheme.h" />
     <ClInclude Include="ChromeThemeKeys.h" />
@@ -154,10 +155,16 @@
     <ClCompile Include="MainWindow.xaml.cpp">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="MainWindowCommands.cpp" />
+    <ClCompile Include="MainWindowDialogs.cpp" />
+    <ClCompile Include="MainWindowMap.cpp" />
+    <ClCompile Include="MainWindowScanning.cpp" />
+    <ClCompile Include="MainWindowTips.cpp" />
     <ClCompile Include="ShellOps.cpp" />
     <ClCompile Include="ChromeTheme.cpp" />
     <ClCompile Include="MapRenderer.cpp" />
     <ClCompile Include="MapRendererPie.cpp" />
+    <ClCompile Include="MapRendererBackdrop.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>
   <ItemGroup>

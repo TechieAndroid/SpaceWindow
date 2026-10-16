@@ -51,6 +51,7 @@ namespace sm
             .rescanDrive = L"Re&scan",
             .showFreeSpace = L"Show Free Spa&ce",
             .pieChart = L"Pie Ch&art",
+            .invertedPie = L"In&verted Pie Chart",
             .properties = L"&Properties…",
             .showInExplorer = L"Show in File E&xplorer",
             .copyPath = L"Copy Pat&h",
@@ -64,6 +65,7 @@ namespace sm
             .tbZoomOut = L"Zoom Out",
             .tbFreeSpace = L"Free Space",
             .tbPieChart = L"Pie Chart",
+            .tbInvertedPie = L"Inverted Pie",
             .tbRun = L"Run or Open",
             .tbDelete = L"Delete",
             .tbSetup = L"Setup",
@@ -102,6 +104,7 @@ namespace sm
             .attributeNames = { L"Archive", L"Compressed", L"Folder", L"Encrypted", L"Hidden", L"Offline",
                                 L"Read-only", L"Reparse point", L"Sparse", L"System", L"Temporary" },
             .themeNames = { L"Use system setting", L"Light", L"Dark" },
+            .backdropNames = { L"None", L"DOOM Fire", L"Matrix", L"Color Mix", L"Game of Life", L"Y2K Tunnel" },
 
             .selectDrive = L"Select a Drive or Folder",
             .browseFolder = L"Browse for a folder…",
@@ -145,26 +148,31 @@ namespace sm
             .themesFolder = L"Open themes folder",
             .themeErrors = L"Some theme files could not be used:",
             .language = L"Language",
+            .backgroundAnimation = L"Background animation",
+            .backgroundAnimationHint = L"Plays around the pie charts and behind the welcome screen",
             .keyboardShortcuts = L"Keyboard Shortcuts",
-            .shortcuts = { {
-                { L"← / ↑ / → / ↓", L"Select the nearest box or slice in that direction" },
-                { L"Enter", L"Zoom into the selected folder, or run or open the selected file" },
-                { L"Alt+↑ / Backspace", L"Up one level (Zoom Out)" },
-                { L"Alt+↓", L"Down one level: towards the selection, or else back the way you came up" },
-                { L"Alt+←", L"Back to the previous view" },
-                { L"Alt+→", L"Forward again, to the view you went back from" },
-                { L"Home", L"All the way out (Zoom Full)" },
-                { L"Esc", L"Clear the selection" },
-                { L"Ctrl+O", L"Open a drive or folder" },
-                { L"F5", L"Reload: read again what changed" },
-                { L"Shift+F5", L"Full Rescan: scan everything again" },
-                { L"Ctrl+P", L"Switch between the treemap and the pie chart" },
-                { L"Del", L"Move the selection to the Recycle Bin" },
-                { L"Alt+Enter", L"Properties of the selection" },
-                { L"Ctrl+Shift+C", L"Copy the path of the selection" },
-                { L"Menu", L"Context menu of the selection" },
-                { L"F1", L"About SpaceWindow" },
-            } },
+            .keyNames = { .ctrl = L"Ctrl", .shift = L"Shift", .alt = L"Alt", .enter = L"Enter", .backspace = L"Backspace",
+                          .home = L"Home", .escape = L"Esc", .del = L"Del", .menu = L"Menu" },
+            .shortcutHelp = {
+                .selectNearest = L"Select the nearest box or slice in that direction",
+                .activate = L"Zoom into the selected folder, or run or open the selected file",
+                .zoomOut = L"Up one level (Zoom Out)",
+                .goDown = L"Down one level: towards the selection, or else back the way you came up",
+                .goBack = L"Back to the previous view",
+                .goForward = L"Forward again, to the view you went back from",
+                .zoomFull = L"All the way out (Zoom Full)",
+                .clearSelection = L"Clear the selection",
+                .open = L"Open a drive or folder",
+                .reload = L"Reload: read again what changed",
+                .fullRescan = L"Full Rescan: scan everything again",
+                .pieChart = L"Switch between the treemap and the pie chart",
+                .invertedPie = L"Switch between the treemap and the inverted pie chart",
+                .del = L"Move the selection to the Recycle Bin",
+                .properties = L"Properties of the selection",
+                .copyPath = L"Copy the path of the selection",
+                .contextMenu = L"Context menu of the selection",
+                .about = L"About SpaceWindow",
+            },
         };
 
         constexpr Lang MakeEnglishUk()
@@ -173,9 +181,12 @@ namespace sm
             lang.code = L"uk";
             lang.name = L"English (UK/Aust.)";
             lang.locale = L"en-GB";
+            // clang-format off: laid out by hand
             lang.colorNames = { L"Rainbow", L"Windows Colours", L"White", L"Light Grey", L"Dark Grey", L"Red",
                                 L"Orange", L"Yellow", L"Green", L"Aqua", L"Blue", L"Violet" };
+            // clang-format on
             lang.displayColors = L"Display Colours";
+            lang.backdropNames = { L"None", L"DOOM Fire", L"Matrix", L"Colour Mix", L"Game of Life", L"Y2K Tunnel" };
             lang.warranty = L"You may distribute this program freely.  Because this program is free, the author "
                             L"cannot and will not assume responsibility for this program's behaviour.  There are "
                             L"no warranties of any kind, expressed or implied, on this product.";
@@ -217,6 +228,7 @@ namespace sm
             .rescanDrive = L"Ac&tualiser",
             .showFreeSpace = L"Afficher l'espace &libre",
             .pieChart = L"&Graphique en secteurs",
+            .invertedPie = L"Secteurs &inversés",
             .properties = L"&Propriétés…",
             .showInExplorer = L"Afficher dans l'Explorateur de &fichiers",
             .copyPath = L"&Copier le chemin d'accès",
@@ -230,6 +242,7 @@ namespace sm
             .tbZoomOut = L"Zoom arrière",
             .tbFreeSpace = L"Espace libre",
             .tbPieChart = L"Secteurs",
+            .tbInvertedPie = L"Secteurs inversés",
             .tbRun = L"Exécuter",
             .tbDelete = L"Supprimer",
             .tbSetup = L"Paramètres",
@@ -268,6 +281,8 @@ namespace sm
             .attributeNames = { L"Archive", L"Compressé", L"Dossier", L"Chiffré", L"Caché", L"Hors connexion",
                                 L"Lecture seule", L"Point d'analyse", L"Éparse", L"Système", L"Temporaire" },
             .themeNames = { L"Utiliser le paramètre système", L"Clair", L"Sombre" },
+            .backdropNames = { L"Aucune", L"Feu de DOOM", L"Matrice", L"Mélange de couleurs", L"Jeu de la vie",
+                               L"Tunnel Y2K" },
 
             .selectDrive = L"Sélectionner un lecteur ou un dossier",
             .browseFolder = L"Parcourir les dossiers…",
@@ -311,26 +326,31 @@ namespace sm
             .themesFolder = L"Ouvrir le dossier des thèmes",
             .themeErrors = L"Certains fichiers de thème n'ont pas pu être utilisés :",
             .language = L"Langue",
+            .backgroundAnimation = L"Animation d'arrière-plan",
+            .backgroundAnimationHint = L"Autour des graphiques en secteurs et derrière l'écran d'accueil",
             .keyboardShortcuts = L"Raccourcis clavier",
-            .shortcuts = { {
-                { L"← / ↑ / → / ↓", L"Sélectionner la boîte ou le secteur le plus proche dans cette direction" },
-                { L"Entrée", L"Zoom avant sur le dossier sélectionné, ou exécuter ou ouvrir le fichier sélectionné" },
-                { L"Alt+↑ / Retour arrière", L"Remonter d'un niveau (zoom arrière)" },
-                { L"Alt+↓", L"Descendre d'un niveau : vers la sélection, sinon par où vous êtes remonté" },
-                { L"Alt+←", L"Revenir à la vue précédente" },
-                { L"Alt+→", L"Avancer à nouveau, vers la vue d'où vous êtes revenu" },
-                { L"Origine", L"Vue complète" },
-                { L"Échap", L"Annuler la sélection" },
-                { L"Ctrl+O", L"Ouvrir un lecteur ou un dossier" },
-                { L"F5", L"Actualiser : relire ce qui a changé" },
-                { L"Maj+F5", L"Analyse complète : tout relire" },
-                { L"Ctrl+P", L"Basculer entre le compartimentage et le graphique en secteurs" },
-                { L"Suppr", L"Déplacer la sélection vers la Corbeille" },
-                { L"Alt+Entrée", L"Propriétés de la sélection" },
-                { L"Ctrl+Maj+C", L"Copier le chemin d'accès de la sélection" },
-                { L"Menu", L"Menu contextuel de la sélection" },
-                { L"F1", L"À propos de SpaceWindow" },
-            } },
+            .keyNames = { .ctrl = L"Ctrl", .shift = L"Maj", .alt = L"Alt", .enter = L"Entrée", .backspace = L"Retour arrière",
+                          .home = L"Origine", .escape = L"Échap", .del = L"Suppr", .menu = L"Menu" },
+            .shortcutHelp = {
+                .selectNearest = L"Sélectionner la boîte ou le secteur le plus proche dans cette direction",
+                .activate = L"Zoom avant sur le dossier sélectionné, ou exécuter ou ouvrir le fichier sélectionné",
+                .zoomOut = L"Remonter d'un niveau (zoom arrière)",
+                .goDown = L"Descendre d'un niveau : vers la sélection, sinon par où vous êtes remonté",
+                .goBack = L"Revenir à la vue précédente",
+                .goForward = L"Avancer à nouveau, vers la vue d'où vous êtes revenu",
+                .zoomFull = L"Vue complète",
+                .clearSelection = L"Annuler la sélection",
+                .open = L"Ouvrir un lecteur ou un dossier",
+                .reload = L"Actualiser : relire ce qui a changé",
+                .fullRescan = L"Analyse complète : tout relire",
+                .pieChart = L"Basculer entre le compartimentage et le graphique en secteurs",
+                .invertedPie = L"Basculer entre le compartimentage et les secteurs inversés",
+                .del = L"Déplacer la sélection vers la Corbeille",
+                .properties = L"Propriétés de la sélection",
+                .copyPath = L"Copier le chemin d'accès de la sélection",
+                .contextMenu = L"Menu contextuel de la sélection",
+                .about = L"À propos de SpaceWindow",
+            },
         };
 
         constexpr std::array<Lang, 3> kLanguages{ kEnglishUs, kEnglishUk, kFrench };
@@ -464,25 +484,5 @@ namespace sm
             ++i;
         }
         return result;
-    }
-
-    std::vector<std::vector<std::wstring_view>> SplitShortcut(std::wstring_view keys)
-    {
-        constexpr std::wstring_view kOr = L" / ";
-        std::vector<std::vector<std::wstring_view>> alternatives;
-        while (!keys.empty())
-        {
-            std::size_t const end = keys.find(kOr);
-            std::wstring_view combination = keys.substr(0, end);
-            keys = end == std::wstring_view::npos ? std::wstring_view() : keys.substr(end + kOr.size());
-            std::vector<std::wstring_view>& pressed = alternatives.emplace_back();
-            while (!combination.empty())
-            {
-                std::size_t const plus = combination.find(L'+');
-                pressed.push_back(combination.substr(0, plus));
-                combination = plus == std::wstring_view::npos ? std::wstring_view() : combination.substr(plus + 1);
-            }
-        }
-        return alternatives;
     }
 }

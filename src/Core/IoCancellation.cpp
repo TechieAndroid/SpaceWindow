@@ -6,14 +6,26 @@ namespace sm
 {
     IoCancellation::IoCancellation(std::stop_token const& stop) : callback_(stop, Canceller{ this }) {}
 
-    IoCancellation::Enlistment::Enlistment(IoCancellation& owner) : owner_(owner), threadId_(GetCurrentThreadId())
+    IoCancellation::Enlistment::Enlistment(IoCancellation& owner) noexcept
+        : owner_(owner), threadId_(GetCurrentThreadId())
     {
         // CancelSynchronousIo needs a real handle with THREAD_TERMINATE access,
-        // not the pseudo-handle GetCurrentThread returns.
+        // not the pseudo-handle GetCurrentThread returns.  Without one (out of
+        // handles or memory) the thread still scans; a stop then waits for
+        // its I/O to end by itself.
         wil::unique_handle thread(OpenThread(THREAD_TERMINATE, FALSE, threadId_));
-        THROW_LAST_ERROR_IF(!thread);
-        std::scoped_lock const lock(owner_.mutex_);
-        owner_.threads_.push_back({ threadId_, std::move(thread) });
+        if (!thread)
+        {
+            return;
+        }
+        try
+        {
+            std::scoped_lock const lock(owner_.mutex_);
+            owner_.threads_.push_back({ threadId_, std::move(thread) });
+        }
+        catch (...)  // NOLINT(bugprone-empty-catch): not enlisted, as above
+        {
+        }
     }
 
     IoCancellation::Enlistment::~Enlistment()

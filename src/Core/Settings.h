@@ -28,7 +28,21 @@ namespace sm
     {
         Treemap = 0,
         Pie = 1,
+        InvertedPie = 2,  // the folder as the outer ring, deeper levels inward (PieLayout.h)
     };
+
+    // The animation in the space the map leaves free (around the pie charts,
+    // and behind the welcome screen); see Backdrop.h.
+    enum class Backdrop : int
+    {
+        None = 0,
+        Fire = 1,      // the PSX DOOM fire, as in kiedtl/fire and ly
+        Matrix = 2,    // falling characters, as in CMatrix and ly
+        ColorMix = 3,  // ly's colour-mixing pattern
+        Life = 4,      // Conway's Game of Life, as in ly
+        Tunnel = 5,    // an endless, curving neon tube
+    };
+    inline constexpr int kBackdropCount = 6;
 
     struct WindowPlacement
     {
@@ -54,27 +68,28 @@ namespace sm
         static constexpr int kMaxDelay = 99'999;
         static constexpr std::size_t kMaxThemeId = 200;  // theme ids are file names
 
-        int density = 0;            // label density, -3 (fewest) .. 2 (most)
-        int fileColor = 0;          // colour scheme of files (Palette.h)
-        int folderColor = 0;        // colour scheme of folders
-        bool autoRescan = false;    // rescan after deleting
-        bool animatedZoom = true;   // animate zoom in/out
-        bool disableDelete = false; // remove the Delete command
-        bool rolloverBox = false;   // highlight the boxes under the mouse
-        int bias = 0;               // split preference, -20 (horizontal) .. 20 (vertical)
+        int density = 0;             // label density, -3 (fewest) .. 2 (most)
+        int fileColor = 0;           // colour scheme of files (Palette.h)
+        int folderColor = 0;         // colour scheme of folders
+        bool autoRescan = false;     // rescan after deleting
+        bool animatedZoom = true;    // animate zoom in/out
+        bool disableDelete = false;  // remove the Delete command
+        bool rolloverBox = false;    // highlight the boxes under the mouse
+        int bias = 0;                // split preference, -20 (horizontal) .. 20 (vertical)
 
         bool savePosition = false;  // remember the window placement
         WindowPlacement window;
 
         bool showNameTips = true;
-        int nameTipDelay = 125;     // milliseconds
+        int nameTipDelay = 125;  // milliseconds
         bool showInfoTips = true;
         std::uint32_t infoTipFlags = TipDate | TipSize | TipIcon;
-        int infoTipDelay = 250;     // milliseconds
+        int infoTipDelay = 250;  // milliseconds
 
-        std::wstring language;      // Lang::code; empty = follow Windows
+        std::wstring language;           // Lang::code; empty = follow Windows
         std::wstring theme = L"system";  // Theme::id (Theme.h); kept while its theme file is missing
         ViewMode viewMode = ViewMode::Treemap;
+        Backdrop backdrop = Backdrop::None;
 
         // Clamps every value into its valid range.
         void Validate();

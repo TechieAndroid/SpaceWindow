@@ -8,7 +8,8 @@ namespace
 {
     constexpr sm::Rgb Hex(std::uint32_t rgb) noexcept
     {
-        return { static_cast<std::uint8_t>(rgb >> 16), static_cast<std::uint8_t>(rgb >> 8), static_cast<std::uint8_t>(rgb) };
+        return { static_cast<std::uint8_t>(rgb >> 16), static_cast<std::uint8_t>(rgb >> 8),
+                 static_cast<std::uint8_t>(rgb) };
     }
 
     bool SameBox(sm::BoxColors const& a, sm::BoxColors const& b) noexcept
@@ -221,7 +222,7 @@ TEST_CASE(ThemeFileNeedsOnlyThreeColours)
     CHECK_EQ(theme.id, std::wstring(L"test"));
     CHECK_EQ(theme.name, std::wstring(L"test"));  // the file's name
     CHECK(!theme.classic);
-    CHECK(theme.base == sm::ThemeBase::Dark);     // dark background, light text
+    CHECK(theme.base == sm::ThemeBase::Dark);  // dark background, light text
 
     sm::Rgb const background = Hex(0x102030);
     sm::Rgb const text = Hex(0xE0E0E0);
@@ -250,19 +251,18 @@ TEST_CASE(ThemeFileNeedsOnlyThreeColours)
 
 TEST_CASE(ThemeFileSyntax)
 {
-    sm::Theme const theme = ParseOk(
-        L"﻿# A comment line\r\n"
-        L"NAME = Night Owl ; a comment after a value\r\n"
-        L"Base = LIGHT\r\n"
-        L"\r\n"
-        L"[ Window ]\r\n"
-        L"  background = #0a0B0c\r\n"
-        L"text=#FFF\r\n"
-        L"accent = #f80   ; #RGB is #RRGGBB with each digit doubled\r\n"
-        L"[map]\r\n"
-        L"rainbow = #000000,#111111, #222222 #333333\t#444444 , #555555 #666666 #777777\r\n"
-        L"Light-Gray = #ABCDEF\r\n"
-        L"grouped = #123456");
+    sm::Theme const theme = ParseOk(L"﻿# A comment line\r\n"
+                                    L"NAME = Night Owl ; a comment after a value\r\n"
+                                    L"Base = LIGHT\r\n"
+                                    L"\r\n"
+                                    L"[ Window ]\r\n"
+                                    L"  background = #0a0B0c\r\n"
+                                    L"text=#FFF\r\n"
+                                    L"accent = #f80   ; #RGB is #RRGGBB with each digit doubled\r\n"
+                                    L"[map]\r\n"
+                                    L"rainbow = #000000,#111111, #222222 #333333\t#444444 , #555555 #666666 #777777\r\n"
+                                    L"Light-Gray = #ABCDEF\r\n"
+                                    L"grouped = #123456");
     CHECK_EQ(theme.name, std::wstring(L"Night Owl"));
     CHECK(theme.base == sm::ThemeBase::Light);  // as written, though the colours are dark
     CHECK(theme.window.background == Hex(0x0A0B0C));
@@ -309,7 +309,8 @@ TEST_CASE(FindThemeIgnoresCaseAndFallsBackToSystem)
 TEST_CASE(ThemeFilesAreLoadedFromFolders)
 {
     TempFolder const first;
-    first.Write(L"Midnight.ini", "\xEF\xBB\xBFname = Midnight\n[window]\nbackground = #000020\ntext = #E0E0FF\naccent = #8080FF\n");
+    first.Write(L"Midnight.ini",
+                "\xEF\xBB\xBFname = Midnight\n[window]\nbackground = #000020\ntext = #E0E0FF\naccent = #8080FF\n");
     first.Write(L"paper.ini", Utf16File(L"name = Paper — été\n[window]\nbackground = #FFFFF0\n"
                                         L"text = #202020\naccent = #A04000\n"));
     first.Write(L"broken.ini", "[window]\nbackground = nope\n");
@@ -331,8 +332,8 @@ TEST_CASE(ThemeFilesAreLoadedFromFolders)
     {
         ids.push_back(theme.id);
     }
-    std::vector<std::wstring> const expected{ L"system", L"light", L"dark", L"dracula", L"alucard",
-                                              L"Midnight", L"paper", L"extra" };
+    std::vector<std::wstring> const expected{ L"system",  L"light",    L"dark",  L"dracula",
+                                              L"alucard", L"Midnight", L"paper", L"extra" };
     CHECK(ids == expected);
     CHECK_EQ(sm::FindTheme(themes, L"midnight").name, std::wstring(L"Midnight"));
     CHECK_EQ(sm::FindTheme(themes, L"paper").name, std::wstring(L"Paper — été"));
@@ -380,9 +381,10 @@ TEST_CASE(OtherThemesShadeTheirOwnColours)
     CHECK(sm::Luminance(box.highlight) > sm::Luminance(box.face));
     CHECK(sm::Luminance(box.shadow) < sm::Luminance(box.face));
     CHECK(sm::ThemeBoxColors(dracula, sm::kSchemeWindows, 0, true).face == dracula.map.windows);
-    CHECK(sm::ThemeBoxColors(dracula, 5, 0, true).face == dracula.map.fixed[3]);         // "Red"
-    CHECK(sm::ThemeBoxColors(dracula, 12, 2, true).face == dracula.map.rainbow[2]);     // out of range: Rainbow
-    CHECK(SameBox(sm::FreeSpaceColors(dracula, true), { dracula.map.freeSpace, dracula.map.freeSpace, dracula.map.freeSpace }));
+    CHECK(sm::ThemeBoxColors(dracula, 5, 0, true).face == dracula.map.fixed[3]);     // "Red"
+    CHECK(sm::ThemeBoxColors(dracula, 12, 2, true).face == dracula.map.rainbow[2]);  // out of range: Rainbow
+    CHECK(SameBox(sm::FreeSpaceColors(dracula, true),
+                  { dracula.map.freeSpace, dracula.map.freeSpace, dracula.map.freeSpace }));
     CHECK(sm::ThemeMapColors(dracula, false).outline == dracula.map.outline);  // the window mode does not matter
 }
 

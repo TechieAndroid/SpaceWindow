@@ -11,6 +11,11 @@
 // (free space and unscanned space excepted: they always keep their slice).
 // Only as many rings are used as the tree is deep (up to the limit), and
 // every length is in pixels, like the treemap's.
+//
+// Experimental: inverted, the rings travel inward instead.  The current
+// folder is a rim around the edge, its contents the ring inside the rim, and
+// each ring further in shows the contents of the folders in the ring outside
+// it; there is no hub, and the innermost ring's slices meet in the centre.
 #pragma once
 
 #include <cstdint>
@@ -28,7 +33,9 @@ namespace sm
         double gap = 2.0;           // pixels of background between neighbouring slices and rings
         double margin = 8.0;        // pixels between the pie and the edge of the area
         double hubFraction = 0.22;  // radius of the hub, as a fraction of the pie's
+        double rimFraction = 0.10;  // inverted: width of the rim, as a fraction of the pie's radius
         bool showFreeSpace = true;
+        bool inverted = false;  // experimental: the folder as a rim, deeper levels further in, to the centre
 
         // Rings and the thinnest slice for a density setting at a given scale
         // (density -3 .. 2, from "too few files" to "too many files", as for the treemap).
@@ -44,7 +51,7 @@ namespace sm
     // A slice; an entry of kNoEntry stands for `folded` small entries of `source`.
     struct PieSlice : MapItem
     {
-        int ring = 0;              // 0 = the ring around the hub
+        int ring = 0;              // 0 = the folder's own contents: around the hub, or inside the rim when inverted
         double start = 0.0;        // radians, clockwise from twelve o'clock
         double sweep = 0.0;        // radians
         std::uint64_t bytes = 0;   // the space the slice stands for
@@ -66,22 +73,36 @@ namespace sm
         PieOptions const& Options() const noexcept { return options_; }
         Folder* Root() const noexcept { return root_; }
         std::uint64_t Total() const noexcept { return total_; }  // the bytes the whole pie stands for
-        int Rings() const noexcept { return rings_; }             // rings in use
+        int Rings() const noexcept { return rings_; }            // rings in use
 
         // Geometry, in pixels.
         PiePoint Center() const noexcept { return { centerX_, centerY_ }; }
         double Radius() const noexcept { return radius_; }
-        double HubRadius() const noexcept { return hubRadius_; }
-        double InnerRadius(int ring) const noexcept { return hubRadius_ + ring * ringWidth_; }
-        double OuterRadius(int ring) const noexcept { return InnerRadius(ring + 1); }
 
-        // Where a slice's label goes: halfway along its arc, halfway through its ring.
+        // The current folder itself: the hub in the middle (from 0), or the rim
+        // around the edge when inverted.
+        double HubInner() const noexcept { return hubInner_; }
+        double HubOuter() const noexcept { return hubOuter_; }
+
+        // Where the rings are: from the hub to the edge, or from the centre to
+        // the rim when inverted (the innermost ring's slices then meet in the centre).
+        double RingsInner() const noexcept { return ringsInner_; }
+        double RingsOuter() const noexcept { return ringsOuter_; }
+        double InnerRadius(int ring) const noexcept
+        {
+            return options_.inverted ? (rings_ - 1 - ring) * ringWidth_ : ringsInner_ + ring * ringWidth_;
+        }
+        double OuterRadius(int ring) const noexcept { return InnerRadius(ring) + ringWidth_; }
+
+        // Where a slice's label goes: halfway along its arc, halfway through its
+        // ring - or, for a slice that comes to a point in the centre, where it
+        // is wider: further out (the centre itself for a whole disc).
         PiePoint Centroid(PieSlice const& slice) const noexcept;
 
         // The slice at a point - of any kind, so grouped small entries and
-        // free space get tips too - or -1 for the hub and empty space.
+        // free space get tips too - or -1 for the hub (or rim) and empty space.
         int HitTest(double x, double y) const noexcept;
-        bool HubContains(double x, double y) const noexcept;
+        bool HubContains(double x, double y) const noexcept;  // the hub, or the rim when inverted
 
         // The slice at a point and the folders' slices inside it, innermost
         // first (for the rollover highlight).
@@ -102,6 +123,7 @@ namespace sm
         std::uint64_t Weight(Entry const& entry) const noexcept;
         std::uint64_t TotalOf(Folder const& folder) const noexcept;
         int RingsNeeded(Folder const& folder, int limit) const;
+        int RingAt(double radius) const noexcept;
         void ToPolar(double x, double y, double& radius, double& angle) const noexcept;
 
         PieOptions options_;
@@ -112,7 +134,10 @@ namespace sm
         double centerX_ = 0.0;
         double centerY_ = 0.0;
         double radius_ = 0.0;
-        double hubRadius_ = 0.0;
+        double hubInner_ = 0.0;
+        double hubOuter_ = 0.0;
+        double ringsInner_ = 0.0;
+        double ringsOuter_ = 0.0;
         double ringWidth_ = 0.0;
     };
 }

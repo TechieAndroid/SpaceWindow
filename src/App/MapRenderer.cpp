@@ -79,8 +79,8 @@ namespace sm::ui
         };
         UINT const flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
         HRESULT const hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, kLevels,
-                                             static_cast<UINT>(std::size(kLevels)), D3D11_SDK_VERSION,
-                                             d3dDevice_.put(), nullptr, nullptr);
+                                             static_cast<UINT>(std::size(kLevels)), D3D11_SDK_VERSION, d3dDevice_.put(),
+                                             nullptr, nullptr);
         if (FAILED(hr))
         {
             // No usable GPU (a virtual machine, a remote session): use the WARP rasterizer.
@@ -126,14 +126,15 @@ namespace sm::ui
         winrt::com_ptr<IDXGISurface> surface;
         winrt::check_hresult(swapChain_->GetBuffer(0, IID_PPV_ARGS(surface.put())));
         D2D1_PIXEL_FORMAT const format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
-        D2D1_BITMAP_PROPERTIES1 const targetProperties = D2D1::BitmapProperties1(
-            D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW, format, 96.0f, 96.0f);
+        D2D1_BITMAP_PROPERTIES1 const targetProperties =
+            D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW, format, 96.0f, 96.0f);
         winrt::check_hresult(context_->CreateBitmapFromDxgiSurface(surface.get(), &targetProperties, target_.put()));
 
         D2D1_BITMAP_PROPERTIES1 const baseProperties =
             D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET, format, 96.0f, 96.0f);
-        winrt::check_hresult(context_->CreateBitmap(D2D1::SizeU(static_cast<UINT32>(width_), static_cast<UINT32>(height_)),
-                                                    nullptr, 0, &baseProperties, base_.put()));
+        winrt::check_hresult(
+            context_->CreateBitmap(D2D1::SizeU(static_cast<UINT32>(width_), static_cast<UINT32>(height_)), nullptr, 0,
+                                   &baseProperties, base_.put()));
 
         // The panel stretches the swap chain by the composition scale; undo
         // that so one swap-chain pixel is exactly one screen pixel.
@@ -149,9 +150,9 @@ namespace sm::ui
         float const size = kFontSizeDips * scale_;
         auto const make = [&](DWRITE_TEXT_ALIGNMENT alignment, bool trimmed) {
             winrt::com_ptr<IDWriteTextFormat> format;
-            winrt::check_hresult(dwriteFactory_->CreateTextFormat(fontFamily_.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                                                                  DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                                                                  size, L"", format.put()));
+            winrt::check_hresult(dwriteFactory_->CreateTextFormat(fontFamily_.c_str(), nullptr,
+                                                                  DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                                                  DWRITE_FONT_STRETCH_NORMAL, size, L"", format.put()));
             winrt::check_hresult(format->SetTextAlignment(alignment));
             winrt::check_hresult(format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER));
             winrt::check_hresult(format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP));
@@ -171,70 +172,54 @@ namespace sm::ui
         measureFormat_ = make(DWRITE_TEXT_ALIGNMENT_LEADING, false);
 
         winrt::com_ptr<IDWriteTextLayout> layout;
-        winrt::check_hresult(dwriteFactory_->CreateTextLayout(L"Ag", 2, measureFormat_.get(), 1000.0f, 1000.0f, layout.put()));
+        winrt::check_hresult(
+            dwriteFactory_->CreateTextLayout(L"Ag", 2, measureFormat_.get(), 1000.0f, 1000.0f, layout.put()));
         DWRITE_TEXT_METRICS metrics{};
         winrt::check_hresult(layout->GetMetrics(&metrics));
         lineHeight_ = metrics.height;
+        widths_.clear();  // measured in the old size
         dotsWidth_ = TextWidth(L"...");
     }
 
     std::wstring MapRenderer::FitName(std::wstring_view name, float width) const
     {
-        constexpr std::size_t kFirstLetters = 5;    // at least this many of the name's first letters...
-        constexpr std::wstring_view kDots = L"...";  // ...and these, or no name at all
+        if (name.empty())
+        {
+            return {};
+        }
+        if (TextWidth(name) <= width)
+        {
+            return std::wstring(name);  // most names: whole, and measured before
+        }
+        // Its letters - clusters: a letter with its accents, or both halves of
+        // a surrogate pair - for sm::FitName to keep as many as fit.
         winrt::com_ptr<IDWriteTextLayout> layout;
-        DWRITE_TEXT_METRICS metrics{};
-        if (name.empty() ||
-            FAILED(dwriteFactory_->CreateTextLayout(name.data(), static_cast<UINT32>(name.size()), measureFormat_.get(),
-                                                    1.0e6f, 1.0e6f, layout.put())) ||
-            FAILED(layout->GetMetrics(&metrics)))
-        {
-            return {};
-        }
-        if (metrics.widthIncludingTrailingWhitespace <= width)
-        {
-            return std::wstring(name);
-        }
-
-        // Whole letters - clusters: a letter with its accents, or both halves
-        // of a surrogate pair - for as long as they fit with the dots.
         UINT32 count = 0;
+        if (FAILED(dwriteFactory_->CreateTextLayout(name.data(), static_cast<UINT32>(name.size()), measureFormat_.get(),
+                                                    1.0e6f, 1.0e6f, layout.put())))
+        {
+            return {};
+        }
         (void)layout->GetClusterMetrics(nullptr, 0, &count);  // fails, asking for room for `count`
-        std::vector<DWRITE_CLUSTER_METRICS> clusters(count);
-        if (count == 0 || FAILED(layout->GetClusterMetrics(clusters.data(), count, &count)))
+        std::vector<DWRITE_CLUSTER_METRICS> metrics(count);
+        if (count == 0 || FAILED(layout->GetClusterMetrics(metrics.data(), count, &count)))
         {
             return {};
         }
-        float const room = width - dotsWidth_;
-        float used = 0.0f;
-        std::size_t letters = 0;
-        std::size_t length = 0;  // UTF-16 code units
-        for (DWRITE_CLUSTER_METRICS const& cluster : clusters)
+        std::vector<sm::Cluster> clusters;
+        clusters.reserve(metrics.size());
+        for (DWRITE_CLUSTER_METRICS const& cluster : metrics)
         {
-            if (used + cluster.width > room)
-            {
-                break;
-            }
-            used += cluster.width;
-            length += cluster.length;
-            ++letters;
+            clusters.push_back({ cluster.width, cluster.length });
         }
-        if (letters < kFirstLetters)
-        {
-            return {};
-        }
-        std::wstring_view prefix = name.substr(0, length);
-        while (!prefix.empty() && prefix.back() == L' ')
-        {
-            prefix.remove_suffix(1);  // "Program..." rather than "Program ..."
-        }
-        return std::wstring(prefix).append(kDots);
+        return sm::FitName(name, clusters, width, dotsWidth_);
     }
 
     void MapRenderer::ReleaseDevice() noexcept
     {
         // The panel keeps the old swap chain until CreateDeviceResources() hands
         // it a new one (SetSwapChain does not accept null).
+        ReleaseBackdrop();
         target_ = nullptr;
         base_ = nullptr;
         brush_ = nullptr;
@@ -276,8 +261,8 @@ namespace sm::ui
             context_->SetTarget(nullptr);
             target_ = nullptr;
             base_ = nullptr;
-            HRESULT const hr =
-                swapChain_->ResizeBuffers(2, static_cast<UINT>(width_), static_cast<UINT>(height_), DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+            HRESULT const hr = swapChain_->ResizeBuffers(2, static_cast<UINT>(width_), static_cast<UINT>(height_),
+                                                         DXGI_FORMAT_B8G8R8A8_UNORM, 0);
             if (IsDeviceLost(hr))
             {
                 ReleaseDevice();
@@ -315,8 +300,8 @@ namespace sm::ui
             return { selection, selection, selection };
         }
         sm::Settings const& settings = *scene.settings;
-        sm::BoxColors colors = sm::ThemeBoxColors(*scene.theme, folder ? settings.folderColor : settings.fileColor, depth,
-                                                  scene.darkTheme);
+        sm::BoxColors colors = sm::ThemeBoxColors(*scene.theme, folder ? settings.folderColor : settings.fileColor,
+                                                  depth, scene.darkTheme);
         if (settings.rolloverBox)
         {
             colors = sm::ApplyRollover(colors, highlighted);
@@ -332,6 +317,10 @@ namespace sm::ui
 
     float MapRenderer::TextWidth(std::wstring_view text) const
     {
+        if (auto const known = widths_.find(text); known != widths_.end())
+        {
+            return known->second;
+        }
         winrt::com_ptr<IDWriteTextLayout> layout;
         DWRITE_TEXT_METRICS metrics{};
         if (FAILED(dwriteFactory_->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()), measureFormat_.get(),
@@ -340,6 +329,12 @@ namespace sm::ui
         {
             return std::numeric_limits<float>::infinity();  // unmeasurable text never "fits"
         }
+        constexpr std::size_t kRemembered = 8192;  // a few screens' worth of labels
+        if (widths_.size() >= kRemembered)
+        {
+            widths_.clear();
+        }
+        widths_.emplace(text, metrics.widthIncludingTrailingWhitespace);
         return metrics.widthIncludingTrailingWhitespace;
     }
 
@@ -351,21 +346,44 @@ namespace sm::ui
         }
         try
         {
-            if (!baseValid_)
+            // With an animation playing, the cached map leaves its background
+            // transparent for the animation to show through.
+            bool const animated = scene.backdrop != sm::Backdrop::None;
+            if (!baseValid_ || baseTransparent_ != animated)
             {
+                baseTransparent_ = animated;
                 DrawBase(scene);
                 baseValid_ = true;
+            }
+            if (animated)
+            {
+                PrepareBackdrop(scene);  // steps it and draws its off-screen parts
+            }
+            else if (backdrop_.kind != sm::Backdrop::None)
+            {
+                ReleaseBackdrop();  // stopped: its bitmaps can go
             }
 
             context_->SetTarget(target_.get());
             context_->BeginDraw();
             context_->SetTransform(D2D1::Matrix3x2F::Identity());
-            // Copy (not blend) the cached map: every pixel is replaced, so no clear is needed.
-            context_->DrawImage(base_.get(), D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_SOURCE_COPY);
+            if (animated)
+            {
+                DrawBackdrop(scene);  // covers every pixel
+                context_->DrawImage(base_.get(), D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                                    D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            }
+            else
+            {
+                // Copy (not blend) the cached map: every pixel is replaced, so no clear is needed.
+                context_->DrawImage(base_.get(), D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                                    D2D1_COMPOSITE_MODE_SOURCE_COPY);
+            }
             if (scene.tree != nullptr && (scene.pie != nullptr || scene.layout != nullptr))
             {
                 // std::cmp_* compares signed with unsigned without wrap-around.
-                std::size_t const count = scene.pie != nullptr ? scene.pie->Items().size() : scene.layout->Items().size();
+                std::size_t const count =
+                    scene.pie != nullptr ? scene.pie->Items().size() : scene.layout->Items().size();
                 auto const draw = [&](int index, State state) {
                     if (scene.pie != nullptr)
                     {
@@ -433,7 +451,7 @@ namespace sm::ui
         context_->SetTarget(base_.get());
         context_->BeginDraw();
         context_->SetTransform(D2D1::Matrix3x2F::Identity());
-        context_->Clear(scene.background ? ToColor(*scene.background) : kTransparent);
+        context_->Clear(scene.background && !baseTransparent_ ? ToColor(*scene.background) : kTransparent);
         if (scene.tree != nullptr && scene.pie != nullptr)
         {
             DrawPie(scene);
@@ -470,8 +488,7 @@ namespace sm::ui
         auto const top = static_cast<float>(item.y);
         auto const right = static_cast<float>(item.x + item.w + 1);  // boxes include their right/bottom outline
         auto const bottom = static_cast<float>(item.y + item.h + 1);
-        sm::BoxColors const colors =
-            ItemColors(scene, item, state == State::Highlighted, state == State::Selected);
+        sm::BoxColors const colors = ItemColors(scene, item, state == State::Highlighted, state == State::Selected);
 
         if (!item.IsSpecial())
         {

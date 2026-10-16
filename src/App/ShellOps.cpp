@@ -95,8 +95,8 @@ namespace sm::shell
 
         // Recycle without asking again (we already asked), but let Windows warn
         // if the item is too big for the Recycle Bin and would be destroyed.
-        DWORD const flags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_WANTNUKEWARNING | FOFX_RECYCLEONDELETE |
-                            FOFX_EARLYFAILURE;
+        DWORD const flags =
+            FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_WANTNUKEWARNING | FOFX_RECYCLEONDELETE | FOFX_EARLYFAILURE;
         if (FAILED(operation->SetOwnerWindow(owner)) || FAILED(operation->SetOperationFlags(flags)) ||
             FAILED(operation->DeleteItem(item.get(), nullptr)))
         {
@@ -113,7 +113,7 @@ namespace sm::shell
         return SUCCEEDED(hr) ? DeleteResult::Deleted : DeleteResult::Failed;
     }
 
-    std::vector<DriveInfo> EnumerateDrives()
+    std::vector<DriveInfo> EnumerateDrives(int iconSize)
     {
         ComScope const com;
         QuietErrors const quiet;
@@ -153,6 +153,7 @@ namespace sm::shell
             {
                 drive.displayName = drive.root;
             }
+            drive.icon = GetIcon(drive.root, iconSize);
             drives.push_back(std::move(drive));
         }
         return drives;
@@ -160,6 +161,7 @@ namespace sm::shell
 
     IconPixels GetIcon(std::wstring const& path, int size)
     {
+        ComScope const com;  // on a background thread; the UI thread has COM already
         IconPixels icon;
         wil::com_ptr_nothrow<IShellItemImageFactory> factory;
         if (size <= 0 || FAILED(SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&factory))))

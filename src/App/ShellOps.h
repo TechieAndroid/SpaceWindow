@@ -35,20 +35,6 @@ namespace sm::shell
     // cannot be recycled.
     DeleteResult Recycle(HWND owner, std::wstring const& path);
 
-    struct DriveInfo
-    {
-        std::wstring root;          // "C:\"
-        std::wstring displayName;   // "Local Disk (C:)"
-        UINT type = DRIVE_UNKNOWN;
-        bool ready = false;         // false: no media in a removable drive, disconnected share, ...
-        std::uint64_t totalBytes = 0;
-        std::uint64_t freeBytes = 0;
-    };
-
-    // Lists the drives.  Slow drives (network, removable) can take a while to
-    // answer, so call this off the UI thread.
-    std::vector<DriveInfo> EnumerateDrives();
-
     // A file's or drive's shell icon, as premultiplied 32-bit BGRA pixels.
     struct IconPixels
     {
@@ -56,7 +42,26 @@ namespace sm::shell
         int height = 0;
         std::vector<std::uint8_t> bgra;
     };
+
+    // The icon of a file, folder or drive, `size` pixels square.  The shell
+    // can take its time (a large program, a network share): any thread.
     IconPixels GetIcon(std::wstring const& path, int size);
+
+    struct DriveInfo
+    {
+        std::wstring root;         // "C:\"
+        std::wstring displayName;  // "Local Disk (C:)"
+        UINT type = DRIVE_UNKNOWN;
+        bool ready = false;  // false: no media in a removable drive, disconnected share, ...
+        std::uint64_t totalBytes = 0;
+        std::uint64_t freeBytes = 0;
+        IconPixels icon;
+    };
+
+    // Lists the drives, with their icons `iconSize` pixels square.  Slow
+    // drives (network, removable) can take a while to answer, so call this
+    // off the UI thread.
+    std::vector<DriveInfo> EnumerateDrives(int iconSize);
 
     // The classic folder picker (used if the Windows App SDK picker is unavailable).
     std::optional<std::wstring> PickFolder(HWND owner);

@@ -26,12 +26,12 @@ namespace sm
 {
     struct LayoutOptions
     {
-        int minWidth = 32;     // smallest box that gets subdivided or labelled (1.4.0's hmin)
-        int minHeight = 24;    // (1.4.0's vmin)
-        int bias = 0;          // -20 favours horizontal strips .. +20 vertical strips
+        int minWidth = 32;   // smallest box that gets subdivided or labelled (1.4.0's hmin)
+        int minHeight = 24;  // (1.4.0's vmin)
+        int bias = 0;        // -20 favours horizontal strips .. +20 vertical strips
         bool showFreeSpace = true;
-        int border = 3;        // inset of a folder's contents from its outline
-        int header = 12;       // distance from a folder's top to its contents (title band)
+        int border = 3;   // inset of a folder's contents from its outline
+        int header = 12;  // distance from a folder's top to its contents (title band)
 
         // The minimum box size for a density setting at a given scale, from
         // the 1.4.0 table (density -3 .. 2 maps to rows 0 .. 5).

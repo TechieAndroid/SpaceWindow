@@ -22,7 +22,7 @@ namespace
             Put<std::uint32_t>(0x00, 0x454C4946);  // "FILE"
             Put<std::uint16_t>(0x04, 0x30);        // update sequence array offset
             Put<std::uint16_t>(0x06, static_cast<std::uint16_t>(size / 512 + 1));
-            Put<std::uint16_t>(0x14, 0x48);        // first attribute
+            Put<std::uint16_t>(0x14, 0x48);  // first attribute
             Put<std::uint16_t>(0x16, flags);
             Put<std::uint32_t>(0x1C, static_cast<std::uint32_t>(size));
             next_ = 0x48;
@@ -240,9 +240,8 @@ TEST_CASE(RunListsAreDecoded)
 {
     // 16 clusters at 256; 5 at 256 - 16 = 240 (a negative step); 8 sparse; end.
     std::array const runs{ std::byte{ 0x21 }, std::byte{ 0x10 }, std::byte{ 0x00 }, std::byte{ 0x01 },
-                           std::byte{ 0x11 }, std::byte{ 0x05 }, std::byte{ 0xF0 },
-                           std::byte{ 0x01 }, std::byte{ 0x08 },
-                           std::byte{ 0x00 } };
+                           std::byte{ 0x11 }, std::byte{ 0x05 }, std::byte{ 0xF0 }, std::byte{ 0x01 },
+                           std::byte{ 0x08 }, std::byte{ 0x00 } };
     std::vector<sm::ntfs::Extent> extents;
     CHECK(sm::ntfs::DecodeRuns(runs, 100, extents));
     CHECK_EQ(extents.size(), std::size_t{ 3 });
@@ -279,7 +278,8 @@ TEST_CASE(FileRecordsAreRead)
     CHECK_EQ(file.names[0].parent, std::uint64_t{ 1234 });
     CHECK(file.Name(file.names[0]) == L"Quarterly report.docx");
     CHECK_EQ(file.lastWriteTime, kTime);
-    CHECK_EQ(file.ListedAttributes(), static_cast<std::uint32_t>(FILE_ATTRIBUTE_ARCHIVE));  // as a folder listing shows them
+    CHECK_EQ(file.ListedAttributes(),
+             static_cast<std::uint32_t>(FILE_ATTRIBUTE_ARCHIVE));  // as a folder listing shows them
     CHECK_EQ(file.length, std::uint64_t{ 5000 });
     CHECK_EQ(file.SizeOnDisk(), std::uint64_t{ 8192 });
     CHECK(!file.IsAlias());
@@ -294,7 +294,9 @@ TEST_CASE(FileRecordsAreRead)
 
     // Compressed and sparse files take what is really allocated.
     RecordWriter compressed;
-    compressed.StandardInformation(kTime, FILE_ATTRIBUTE_COMPRESSED).Name(5, L"log.txt").Data(65536, 60000, 0x0001, 12288);
+    compressed.StandardInformation(kTime, FILE_ATTRIBUTE_COMPRESSED)
+        .Name(5, L"log.txt")
+        .Data(65536, 60000, 0x0001, 12288);
     CHECK_EQ(Parse(compressed.Clean(), 79).SizeOnDisk(), std::uint64_t{ 12288 });
 
     // Windows' file compression keeps the data in a stream of its own.
@@ -312,7 +314,9 @@ TEST_CASE(FileRecordsAreRead)
 
     // A junction stands for a folder elsewhere.
     RecordWriter junction(kInUse | kDirectory);
-    junction.StandardInformation(kTime, FILE_ATTRIBUTE_REPARSE_POINT).Name(5, L"Link").ReparsePoint(IO_REPARSE_TAG_MOUNT_POINT);
+    junction.StandardInformation(kTime, FILE_ATTRIBUTE_REPARSE_POINT)
+        .Name(5, L"Link")
+        .ReparsePoint(IO_REPARSE_TAG_MOUNT_POINT);
     sm::ntfs::FileRecord const link = Parse(junction.Clean(), 81);
     CHECK(link.directory);
     CHECK(link.IsAlias());
@@ -368,7 +372,9 @@ namespace
     std::unique_ptr<sm::Folder> BuildVolume(bool extensionFirst)
     {
         std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> records;
-        auto const add = [&records](std::uint64_t number, RecordWriter& writer) { records.emplace_back(number, writer.Clean()); };
+        auto const add = [&records](std::uint64_t number, RecordWriter& writer) {
+            records.emplace_back(number, writer.Clean());
+        };
         RecordWriter root(kInUse | kDirectory);
         root.StandardInformation(kTime, FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM).Name(5, L".");
         RecordWriter mft;
@@ -384,7 +390,9 @@ namespace
         RecordWriter linked;
         linked.StandardInformation(kTime, 0).Name(5, L"a.bin").Name(30, L"a.bin").Data(8192, 8000);
         RecordWriter junction(kInUse | kDirectory);
-        junction.StandardInformation(kTime, FILE_ATTRIBUTE_REPARSE_POINT).Name(5, L"Link").ReparsePoint(IO_REPARSE_TAG_MOUNT_POINT);
+        junction.StandardInformation(kTime, FILE_ATTRIBUTE_REPARSE_POINT)
+            .Name(5, L"Link")
+            .ReparsePoint(IO_REPARSE_TAG_MOUNT_POINT);
         RecordWriter orphan(kInUse | kDirectory);
         orphan.StandardInformation(kTime, 0).Name(999, L"Orphan");
         RecordWriter orphanFile;
@@ -448,9 +456,14 @@ TEST_CASE(MasterFileTableBecomesTheTree)
         sm::Entry const* const big = Find(inside, L"big.iso");
         CHECK(big != nullptr && big->size == (1u << 20));  // its data is in its extension record
 
-        // Totals: each link counts, like a folder listing.
-        CHECK_EQ(inside.SizeTotal(), std::uint64_t{ 4096 + 8192 + (1 << 20) });
-        CHECK_EQ(root->SizeTotal(), std::uint64_t{ 8192 + 4096 + 8192 + (1 << 20) });
+        // Totals: the hard-linked a.bin is listed under both its names but
+        // counted once, under the one nearer the root, as CountHardLinksOnce does.
+        sm::Entry const* const counted = Find(*root, L"a.bin");
+        sm::Entry const* const other = Find(inside, L"a.bin");
+        CHECK(counted->size == 8192 && !counted->countedElsewhere);
+        CHECK(other->size == 0 && other->countedElsewhere && other->logicalSize == 8000);
+        CHECK_EQ(inside.SizeTotal(), std::uint64_t{ 4096 + (1 << 20) });
+        CHECK_EQ(root->SizeTotal(), std::uint64_t{ 8192 + 4096 + (1 << 20) });
         CHECK_EQ(root->fileCount, std::uint64_t{ 4 });
         CHECK_EQ(root->folderCount, std::uint64_t{ 1 });
         CHECK_EQ(root->entries.front().size, inside.SizeTotal());  // largest first
@@ -500,7 +513,8 @@ TEST_CASE(ChangeJournalPatchesTheTree)
 {
     std::wstring const rootPath = L"C:\\";
     sm::FolderTree tree(BuildVolume(false), rootPath, sm::VolumeInfo{}, false);
-    auto const changed = [](std::uint32_t record, bool directory, std::vector<std::pair<std::uint32_t, std::wstring>> names,
+    auto const changed = [](std::uint32_t record, bool directory,
+                            std::vector<std::pair<std::uint32_t, std::wstring>> names,
                             std::vector<std::uint32_t> formerFolders, std::uint64_t size = 0) {
         sm::ChangedFile file;
         file.record = record;
@@ -551,6 +565,24 @@ TEST_CASE(ChangeJournalPatchesTheTree)
     CHECK_EQ(root.folderCount, std::uint64_t{ 2 });
     CHECK(tree.journal.has_value() && tree.journal->nextUsn == 4242);
 
+    // The index kept for the next reload is what one built afresh from the tree would be.
+    auto const indexMatchesTheTree = [&tree] {
+        CHECK(tree.journalIndex.has_value());
+        sm::JournalIndex const kept = *tree.journalIndex;
+        tree.journalIndex.reset();
+        (void)sm::LargeFiles(tree);  // builds it again
+        sm::JournalIndex const& fresh = *tree.journalIndex;
+        CHECK(kept.largeFiles == fresh.largeFiles);
+        auto const at = [](sm::JournalIndex const& index, std::size_t record) {
+            return record < index.folders.size() ? index.folders[record] : nullptr;
+        };
+        for (std::size_t record = 0; record < std::max(kept.folders.size(), fresh.folders.size()); ++record)
+        {
+            CHECK(at(kept, record) == at(fresh, record));
+        }
+    };
+    indexMatchesTheTree();
+
     // Applying the same changes again changes nothing.
     sm::ApplyJournalChanges(tree, changes);
     CHECK_EQ(tree.Root()->SizeTotal(), homeFolder.SizeTotal());
@@ -567,11 +599,33 @@ TEST_CASE(ChangeJournalPatchesTheTree)
     CHECK(Find(homeNow, L"shared.bin")->size == 65536 && !Find(homeNow, L"shared.bin")->countedElsewhere);
     CHECK(Find(usersNow, L"shared.bin")->size == 0 && Find(usersNow, L"shared.bin")->countedElsewhere);
     CHECK_EQ(tree.Root()->SizeTotal(), before + 65536);
+    CHECK(tree.hardLinks);
+    indexMatchesTheTree();
 
-    // Deleting "Home" takes everything in it.
+    // A large file is noted for the reloads to read again; once small, it is not.
+    sm::JournalChanges large;
+    large.files.push_back(changed(80, false, { { 30, L"disk.vhdx" } }, { 30 }, std::uint64_t{ 32 } << 20));
+    sm::ApplyJournalChanges(tree, large);
+    CHECK(std::ranges::binary_search(sm::LargeFiles(tree), std::uint32_t{ 80 }));
+    indexMatchesTheTree();
+    large.files.front().size = large.files.front().length = 4096;
+    sm::ApplyJournalChanges(tree, large);
+    CHECK(!std::ranges::binary_search(sm::LargeFiles(tree), std::uint32_t{ 80 }));
+
+    // Deleting "Home" takes everything in it - out of the index too.
     sm::JournalChanges gone;
     gone.files.push_back(changed(50, true, {}, { 5 }));
     sm::ApplyJournalChanges(tree, gone);
     CHECK(tree.Root()->entries.empty());
     CHECK_EQ(tree.Root()->SizeTotal(), std::uint64_t{ 0 });
+    CHECK(tree.journalIndex.has_value());
+    if (tree.journalIndex)
+    {
+        std::vector<sm::Folder*> const& indexed = tree.journalIndex->folders;
+        for (std::size_t const record : { 30, 50 })
+        {
+            CHECK(record >= indexed.size() || indexed[record] == nullptr);
+        }
+    }
+    indexMatchesTheTree();
 }

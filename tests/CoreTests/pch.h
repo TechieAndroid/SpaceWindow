@@ -26,11 +26,13 @@
 #include <ranges>
 #include <set>
 #include <span>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <wil/resource.h>

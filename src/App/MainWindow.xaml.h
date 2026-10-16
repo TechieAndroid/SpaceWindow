@@ -11,6 +11,7 @@
 #include "ChromeTheme.h"
 #include "MapRenderer.h"
 #include "ShellOps.h"
+#include "../Core/Commands.h"
 #include "../Core/FolderTree.h"
 #include "../Core/Lang.h"
 #include "../Core/PieLayout.h"
@@ -32,25 +33,10 @@ namespace winrt::SpaceWindow::implementation
         // Scans a drive or folder and shows it (also used for the command line).
         winrt::fire_and_forget StartScan(std::wstring path);
 
-        // Commands.
-        void OnOpen(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnRescan(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnZoomFull(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnZoomIn(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnZoomOut(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnToggleFreeSpace(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnTogglePieChart(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnRun(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnDelete(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnProperties(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnShowInExplorer(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnCopyPath(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnSettings(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnAbout(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        // The toolbar's buttons and the window's keyboard shortcuts are hooked
+        // up in code (InitializeComponent): both run commands (Run).
         void OnCancelScan(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnShowUnreadable(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OnShortcut(Microsoft::UI::Xaml::Input::KeyboardAccelerator const& accelerator,
-                        Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
 
         // The map.
         void OnMapPointerMoved(Windows::Foundation::IInspectable const&,
@@ -63,13 +49,17 @@ namespace winrt::SpaceWindow::implementation
                                Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
         void OnMapRightTapped(Windows::Foundation::IInspectable const&,
                               Microsoft::UI::Xaml::Input::RightTappedRoutedEventArgs const&);
-        void OnMapKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
-        void OnMapSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
-        void OnMapScaleChanged(Microsoft::UI::Xaml::Controls::SwapChainPanel const&, Windows::Foundation::IInspectable const&);
+        void OnMapKeyDown(Windows::Foundation::IInspectable const&,
+                          Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
+        void OnMapSizeChanged(Windows::Foundation::IInspectable const&,
+                              Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+        void OnMapScaleChanged(Microsoft::UI::Xaml::Controls::SwapChainPanel const&,
+                               Windows::Foundation::IInspectable const&);
 
         // Drag a drive or folder from File Explorer onto the window.
         void OnDragOver(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::DragEventArgs const&);
-        winrt::fire_and_forget OnDrop(Windows::Foundation::IInspectable sender, Microsoft::UI::Xaml::DragEventArgs args);
+        winrt::fire_and_forget OnDrop(Windows::Foundation::IInspectable sender,
+                                      Microsoft::UI::Xaml::DragEventArgs args);
 
         // Dialogs.
         void OnDriveDoubleTapped(Windows::Foundation::IInspectable const&,
@@ -81,6 +71,8 @@ namespace winrt::SpaceWindow::implementation
                                Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void OnThemePreview(Windows::Foundation::IInspectable const&,
                             Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void OnBackdropPreview(Windows::Foundation::IInspectable const&,
+                               Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void OnOpenThemesFolder(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnTipOptionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
@@ -104,8 +96,17 @@ namespace winrt::SpaceWindow::implementation
             std::chrono::steady_clock::time_point start;
         };
 
-        // Commands.
+        // Commands (MainWindowCommands.cpp).  Whether one can run now - the
+        // toolbar's buttons and the context menu's items are enabled by it -
+        // and running one, from a button, a key or the context menu: Run
+        // checks, the commands themselves do not.  Nothing runs while a
+        // dialog is open, and little during a scan.
         bool Busy() const noexcept { return scanning_ || dialogOpen_; }
+        bool CanRun(sm::Command command) const noexcept;
+        void Run(sm::Command command);
+        void OnShortcut(Microsoft::UI::Xaml::Input::KeyboardAccelerator const& accelerator,
+                        Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+        Windows::Foundation::Point SelectionMenuPosition() const;  // where the Menu key opens the context menu
         winrt::fire_and_forget OpenDriveOrFolder();
         void ZoomIn(int item);
         void ZoomIntoSelection();
@@ -119,8 +120,6 @@ namespace winrt::SpaceWindow::implementation
         void SetViewMode(sm::ViewMode mode);
         void RunSelected();
         winrt::fire_and_forget DeleteSelected();
-        void ShowSelectedProperties();
-        void ShowSelectedInExplorer();
         void CopySelectedPath();
         winrt::fire_and_forget ShowSettings();
         winrt::fire_and_forget ShowAbout();
@@ -147,7 +146,7 @@ namespace winrt::SpaceWindow::implementation
         std::uint64_t ViewSize() const noexcept;
 
         // The items of whichever view is showing: treemap boxes or pie slices.
-        bool PieMode() const noexcept { return settings_.viewMode == sm::ViewMode::Pie; }
+        bool PieMode() const noexcept { return settings_.viewMode != sm::ViewMode::Treemap; }
         std::size_t ItemCount() const noexcept;
         sm::MapItem const& Item(int item) const;
         int FindItem(sm::Folder const* folder, std::uint32_t index) const noexcept;
@@ -164,17 +163,20 @@ namespace winrt::SpaceWindow::implementation
         void StartZoomAnimation(D2D1_RECT_F const& from, D2D1_RECT_F const& to);
         void StartZoomAnimation(sm::ui::Sector const& from, sm::ui::Sector const& to);
         void AnimationFrame(sm::ui::MapOverlay& overlay, bool& running);
+        sm::Backdrop ShownBackdrop() const;
+        bool BackdropPaused(std::chrono::steady_clock::time_point now) const noexcept;
+        double BackdropTime(std::chrono::steady_clock::time_point now);
 
         // Tips.
         void HideTips();
         void RestartTipTimers();
         void ShowNameTip();
         void ShowInfoTip();
+        winrt::fire_and_forget LoadTipIcon(std::wstring path, int size, std::uint64_t tip);
         void PlaceTip(Microsoft::UI::Xaml::FrameworkElement const& tip, double x, double y, bool centered = false);
 
         // Scanning.
         void Rescan();
-        void FullRescan();
         sm::Folder* RescanTarget() const noexcept;
         winrt::fire_and_forget UpdateFromChanges();
         winrt::fire_and_forget RescanFolder(sm::Folder* folder);
@@ -187,6 +189,8 @@ namespace winrt::SpaceWindow::implementation
                             Windows::Foundation::IInspectable const&);
 
         // Window chrome.
+        template <typename Visit>
+        void ForEachToolbarButton(Visit&& visit);  // each button, with the command it runs
         void ApplyLanguage();
         void LoadThemes();
         void ApplyTheme(std::wstring id);
@@ -210,7 +214,7 @@ namespace winrt::SpaceWindow::implementation
                                                                 Microsoft::UI::Xaml::FrameworkElement const& content);
         void FillDriveList(std::vector<sm::shell::DriveInfo> const& drives);
         void PopulateSettings();
-        void FillSettingsLists(std::wstring_view theme, int density, int fileColor, int folderColor);
+        void FillSettingsLists(std::wstring_view theme, int density, int fileColor, int folderColor, int backdrop);
         void ApplySettingsText();
         void FillShortcuts();
         void ReadSettings();
@@ -250,7 +254,22 @@ namespace winrt::SpaceWindow::implementation
         std::vector<int> chainScratch_;
         POINT lastPointer_{ -1, -1 };  // pixels
         Windows::Foundation::Point lastPointerDips_{};
+        std::uint64_t tips_ = 0;                  // tips shown and hidden: a late icon checks its tip is still up
+        Windows::Foundation::Point infoTipAt_{};  // where the info tip was placed (DIPs)
         std::optional<ZoomAnimation> zoom_;
+        std::optional<sm::Backdrop> backdropPreview_;  // picked in Settings, shown until OK or Cancel
+        std::chrono::steady_clock::time_point backdropStart_ = std::chrono::steady_clock::now();
+        std::chrono::steady_clock::time_point lastFrame_;
+        bool windowVisible_ = true;  // not minimized: the background animation runs only while it can be seen
+        // It holds its last frame - its clock stopped - while Windows saves
+        // energy, and once the window has been in the background a while.
+        bool windowActive_ = true;
+        std::chrono::steady_clock::time_point deactivatedAt_;
+        bool energySaver_ = false;
+        bool animationsEnabled_ = true;  // Windows' "Animation effects"
+        std::optional<std::chrono::steady_clock::time_point> pausedAt_;
+        winrt::event_token energySaverChanged_{};
+        winrt::event_token animationsChanged_{};
         D2D1_COLOR_F accent_{ 0.0f, 0.47f, 0.84f, 1.0f };
         winrt::event_token renderingToken_{};
 

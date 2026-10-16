@@ -84,24 +84,24 @@ namespace test
     }
 }
 
-#define TEST_CASE(name)                                                    \
-    static void name();                                                    \
-    static ::test::Registrar const name##Registrar{ #name, &name };       \
+#define TEST_CASE(name)                                                                                                \
+    static void name();                                                                                                \
+    static ::test::Registrar const name##Registrar{ #name, &name };                                                    \
     static void name()
 
-#define VOLUME_TEST_CASE(name)                                             \
-    static void name();                                                    \
-    static ::test::Registrar const name##Registrar{ #name, &name, true }; \
+#define VOLUME_TEST_CASE(name)                                                                                         \
+    static void name();                                                                                                \
+    static ::test::Registrar const name##Registrar{ #name, &name, true };                                              \
     static void name()
 
-#define CHECK(condition)                                                                    \
-    do                                                                                      \
-    {                                                                                       \
-        if (!(condition))                                                                   \
-        {                                                                                   \
-            ::test::Fail("CHECK(" #condition ")", std::source_location::current());         \
-        }                                                                                   \
+#define CHECK(condition)                                                                                               \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(condition))                                                                                              \
+        {                                                                                                              \
+            ::test::Fail("CHECK(" #condition ")", std::source_location::current());                                    \
+        }                                                                                                              \
     } while (false)
 
-#define CHECK_EQ(actual, expected) \
+#define CHECK_EQ(actual, expected)                                                                                     \
     ::test::CheckEqual((actual), (expected), #actual, #expected, std::source_location::current())

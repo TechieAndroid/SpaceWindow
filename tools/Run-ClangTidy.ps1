@@ -55,8 +55,8 @@ if ($IncludeApp) {
     }
     $appDefines = @('/DSPACEWINDOW_WASDK_MAJOR=2', '/DSPACEWINDOW_WASDK_MINOR=5', '/DSPACEWINDOW_WASDK_PATCH=1',
                     '/DWINAPI_FAMILY=WINAPI_FAMILY_DESKTOP_APP', '-Wno-deprecated-declarations')
-    foreach ($name in 'ShellOps.cpp', 'ChromeTheme.cpp', 'MapRenderer.cpp', 'MapRendererPie.cpp', 'MainWindow.xaml.cpp', 'App.xaml.cpp') {
-        $jobs += [pscustomobject]@{ File = Join-Path $Root "src\App\$name"; Flags = $common + $appIncludes + $appDefines }
+    Get-ChildItem (Join-Path $Root 'src\App') -Filter *.cpp | Where-Object Name -ne 'pch.cpp' | ForEach-Object {
+        $jobs += [pscustomobject]@{ File = $_.FullName; Flags = $common + $appIncludes + $appDefines }
     }
 }
 

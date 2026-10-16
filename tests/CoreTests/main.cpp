@@ -3,12 +3,12 @@
 //   CoreTests.exe                    run every test but those that read a drive directly
 //   CoreTests.exe <filter>           run the tests whose name contains <filter>
 //   CoreTests.exe --volume [filter]  ... including those that read a drive directly (as administrator)
-//   CoreTests.exe --bench <path>     benchmark the scanner on a real folder or drive
+//   CoreTests.exe --bench <path> [threads...]  benchmark the scanner on a real folder or drive
 //   CoreTests.exe --compare <path>   compare the master file table scan with the folder scanner
 #include "pch.h"
 #include "TestHarness.h"
 
-int RunBenchmark(std::wstring_view path);
+int RunBenchmark(std::wstring_view path, std::span<unsigned const> threadCounts);
 int RunCompare(std::wstring_view path);
 
 namespace test
@@ -25,8 +25,8 @@ namespace test
         {
             return {};
         }
-        int const length = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0,
-                                               nullptr, nullptr);
+        int const length =
+            WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
         std::string result(static_cast<std::size_t>(length), '\0');
         WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), result.data(), length, nullptr,
                             nullptr);
@@ -45,7 +45,15 @@ int wmain(int argc, wchar_t** argv)
 
     if (argc >= 3 && std::wstring_view(argv[1]) == L"--bench")
     {
-        return RunBenchmark(argv[2]);
+        std::vector<unsigned> threadCounts;
+        for (int i = 3; i < argc; ++i)
+        {
+            if (int const count = _wtoi(argv[i]); count > 0)
+            {
+                threadCounts.push_back(static_cast<unsigned>(count));
+            }
+        }
+        return RunBenchmark(argv[2], threadCounts);
     }
     if (argc >= 3 && std::wstring_view(argv[1]) == L"--compare")
     {

@@ -14,16 +14,47 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace sm
 {
-    // A keyboard shortcut as Settings lists it: its keys, joined by '+'
-    // (" / " between shortcuts that do the same thing), and what it does.
-    struct Shortcut
+    // The names of the keys that have one, as printed on keyboards in the
+    // language.  Letters, digits, function keys and arrows are written as
+    // they are (Commands.h).
+    struct KeyNames
     {
-        std::wstring_view keys;
-        std::wstring_view action;
+        std::wstring_view ctrl;
+        std::wstring_view shift;
+        std::wstring_view alt;
+        std::wstring_view enter;
+        std::wstring_view backspace;
+        std::wstring_view home;
+        std::wstring_view escape;
+        std::wstring_view del;
+        std::wstring_view menu;
+    };
+
+    // What each command with keys does, as Settings lists it next to its
+    // keys (Commands.h: ShortcutAction).
+    struct ShortcutHelp
+    {
+        std::wstring_view selectNearest;
+        std::wstring_view activate;
+        std::wstring_view zoomOut;
+        std::wstring_view goDown;
+        std::wstring_view goBack;
+        std::wstring_view goForward;
+        std::wstring_view zoomFull;
+        std::wstring_view clearSelection;
+        std::wstring_view open;
+        std::wstring_view reload;
+        std::wstring_view fullRescan;
+        std::wstring_view pieChart;
+        std::wstring_view invertedPie;
+        std::wstring_view del;
+        std::wstring_view properties;
+        std::wstring_view copyPath;
+        std::wstring_view contextMenu;
+        std::wstring_view about;
     };
 
     struct Lang
@@ -61,6 +92,7 @@ namespace sm
         std::wstring_view rescanDrive;
         std::wstring_view showFreeSpace;
         std::wstring_view pieChart;
+        std::wstring_view invertedPie;
         std::wstring_view properties;
         std::wstring_view showInExplorer;
         std::wstring_view copyPath;
@@ -75,6 +107,7 @@ namespace sm
         std::wstring_view tbZoomOut;
         std::wstring_view tbFreeSpace;
         std::wstring_view tbPieChart;
+        std::wstring_view tbInvertedPie;
         std::wstring_view tbRun;
         std::wstring_view tbDelete;
         std::wstring_view tbSetup;
@@ -96,7 +129,7 @@ namespace sm
         std::wstring_view unreadableFolder;   // info tip of a folder that could not be listed
         std::wstring_view unreadableTitle;    // the list of folders that could not be listed
         std::wstring_view unreadableText;
-        std::wstring_view moreFolders;        // "{0}" = how many more the list leaves out
+        std::wstring_view moreFolders;  // "{0}" = how many more the list leaves out
         std::wstring_view copyList;
         std::wstring_view close;
 
@@ -108,15 +141,16 @@ namespace sm
         std::array<std::wstring_view, 12> monthNames;
         std::array<std::wstring_view, 11> attributeNames;
         std::array<std::wstring_view, 3> themeNames;
+        std::array<std::wstring_view, 6> backdropNames;  // by sm::Backdrop
 
         // Drive selection, scanning and deletion.
         std::wstring_view selectDrive;
         std::wstring_view browseFolder;
         std::wstring_view scanning;
-        std::wstring_view scanFailed;          // "{0}" = path
+        std::wstring_view scanFailed;  // "{0}" = path
         std::wstring_view confirmDeleteTitle;
-        std::wstring_view confirmDelete;       // "{0}" = name, "{1}" = size
-        std::wstring_view deleteFailed;        // "{0}" = name
+        std::wstring_view confirmDelete;  // "{0}" = name, "{1}" = size
+        std::wstring_view deleteFailed;   // "{0}" = name
         std::wstring_view emptyTitle;
         std::wstring_view emptyText;
 
@@ -152,8 +186,11 @@ namespace sm
         std::wstring_view themesFolder;  // opens the folder that theme files go in
         std::wstring_view themeErrors;   // heads the list of theme files that could not be used
         std::wstring_view language;
+        std::wstring_view backgroundAnimation;
+        std::wstring_view backgroundAnimationHint;
         std::wstring_view keyboardShortcuts;
-        std::array<Shortcut, 17> shortcuts;
+        KeyNames keyNames;
+        ShortcutHelp shortcutHelp;
     };
 
     // All available languages.  The first entry is the fallback.
@@ -179,8 +216,4 @@ namespace sm
     // formats used by the original, a mistranslated pattern can never read
     // arguments that were not supplied: unknown placeholders are left as is.
     std::wstring FormatText(std::wstring_view pattern, std::initializer_list<std::wstring_view> args);
-
-    // The keys of a shortcut's alternatives: L"Alt+↑ / Backspace" gives
-    // { { L"Alt", L"↑" }, { L"Backspace" } }.
-    std::vector<std::vector<std::wstring_view>> SplitShortcut(std::wstring_view keys);
 }

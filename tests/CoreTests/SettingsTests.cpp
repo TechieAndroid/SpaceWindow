@@ -45,8 +45,8 @@ namespace
 TEST_CASE(ValidateClampsOutOfRangeValues)
 {
     sm::Settings s;
-    s.density = 3;          // 1.4.0 accepted 3, which matched no entry in its density list
-    s.fileColor = 12;       // ... and colour 12, which read past the end of its palette
+    s.density = 3;     // 1.4.0 accepted 3, which matched no entry in its density list
+    s.fileColor = 12;  // ... and colour 12, which read past the end of its palette
     s.folderColor = -1;
     s.bias = 100;
     s.nameTipDelay = -5;
@@ -55,6 +55,7 @@ TEST_CASE(ValidateClampsOutOfRangeValues)
     s.language = L"FR";
     s.theme = std::wstring(sm::Settings::kMaxThemeId + 1, L'x');
     s.viewMode = static_cast<sm::ViewMode>(-1);
+    s.backdrop = static_cast<sm::Backdrop>(sm::kBackdropCount);
     s.window = { INT_MIN, 0, 800, 600, false };
     s.Validate();
 
@@ -68,7 +69,14 @@ TEST_CASE(ValidateClampsOutOfRangeValues)
     CHECK_EQ(s.language, std::wstring(L"fr"));
     CHECK_EQ(s.theme, std::wstring(L"system"));
     CHECK(s.viewMode == sm::ViewMode::Treemap);
+    CHECK(s.backdrop == sm::Backdrop::None);
     CHECK(!s.window.IsValid());
+
+    sm::Settings inverted;
+    inverted.viewMode = sm::ViewMode::InvertedPie;
+    inverted.backdrop = sm::Backdrop::Tunnel;
+    inverted.Validate();
+    CHECK(inverted.viewMode == sm::ViewMode::InvertedPie && inverted.backdrop == sm::Backdrop::Tunnel);
 
     sm::Settings defaults;
     defaults.Validate();
@@ -107,7 +115,8 @@ TEST_CASE(SettingsRoundTripThroughTheRegistry)
     saved.infoTipDelay = 900;
     saved.language = L"uk";
     saved.theme = L"dracula";
-    saved.viewMode = sm::ViewMode::Pie;
+    saved.viewMode = sm::ViewMode::InvertedPie;
+    saved.backdrop = sm::Backdrop::Tunnel;
 
     CHECK(sm::SaveSettings(saved, scratch.Path()));
     sm::Settings const loaded = sm::LoadSettings(scratch.Path(), scratch.Sub(L"none"));
@@ -148,8 +157,7 @@ TEST_CASE(LegacySettingsAreImported)
     WriteDword(legacy, L"window_rect.bottom", 650);
     WriteDword(legacy, L"window_showcmd", SW_SHOWMAXIMIZED);
     // 1.x was an ANSI program; RegSetValueExA stores REG_SZ as UTF-16 anyway.
-    CHECK(RegSetKeyValueA(HKEY_CURRENT_USER, test::ToUtf8(legacy).c_str(), "lang", REG_SZ, "fr", 3) ==
-          ERROR_SUCCESS);
+    CHECK(RegSetKeyValueA(HKEY_CURRENT_USER, test::ToUtf8(legacy).c_str(), "lang", REG_SZ, "fr", 3) == ERROR_SUCCESS);
 
     sm::Settings const s = sm::LoadSettings(scratch.Sub(L"new"), legacy);
     CHECK_EQ(s.density, -1);

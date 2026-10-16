@@ -8,12 +8,17 @@
 #include "Ntfs.h"
 
 #include "ChangeJournal.h"
+#include "Fields.h"
+#include "Parallel.h"
 
 namespace sm::ntfs
 {
     namespace
     {
         static_assert(std::endian::native == std::endian::little, "NTFS structures are little-endian");
+
+        using fields::At;
+        using fields::Slice;
 
         // Attribute types.
         constexpr std::uint32_t kStandardInformation = 0x10;
@@ -41,13 +46,13 @@ namespace sm::ntfs
         constexpr std::size_t kNameLength = 0x09;
         constexpr std::size_t kNameOffset = 0x0A;
         constexpr std::size_t kAttributeFlags = 0x0C;
-        constexpr std::size_t kValueLength = 0x10;      // resident
+        constexpr std::size_t kValueLength = 0x10;  // resident
         constexpr std::size_t kValueOffset = 0x14;
-        constexpr std::size_t kLowestVcn = 0x10;        // non-resident
+        constexpr std::size_t kLowestVcn = 0x10;  // non-resident
         constexpr std::size_t kMappingPairsOffset = 0x20;
         constexpr std::size_t kAllocatedLength = 0x28;
         constexpr std::size_t kFileSize = 0x30;
-        constexpr std::size_t kTotalAllocated = 0x40;   // only when compressed or sparse
+        constexpr std::size_t kTotalAllocated = 0x40;  // only when compressed or sparse
         constexpr std::uint16_t kCompressedMask = 0x00FF;
         constexpr std::uint16_t kSparse = 0x8000;
 
@@ -66,37 +71,6 @@ namespace sm::ntfs
         constexpr std::size_t kListEntryMinimum = 0x1A;
 
         constexpr std::wstring_view kWofStream = L"WofCompressedData";
-
-        template <typename T>
-        bool Get(std::span<std::byte const> bytes, std::size_t offset, T& value) noexcept
-        {
-            if (offset > bytes.size() || bytes.size() - offset < sizeof(T))
-            {
-                return false;
-            }
-            std::memcpy(&value, bytes.data() + offset, sizeof(T));
-            return true;
-        }
-
-        // A field, or 0 if the bytes end before it.
-        template <typename T>
-        T At(std::span<std::byte const> bytes, std::size_t offset) noexcept
-        {
-            T value{};
-            (void)Get(bytes, offset, value);
-            return value;
-        }
-
-        // The part of `bytes` at [offset, offset + length), or nothing if it does not fit.
-        std::optional<std::span<std::byte const>> Slice(std::span<std::byte const> bytes, std::size_t offset,
-                                                        std::size_t length) noexcept
-        {
-            if (offset > bytes.size() || bytes.size() - offset < length)
-            {
-                return std::nullopt;
-            }
-            return bytes.subspan(offset, length);
-        }
 
         struct Attribute
         {
@@ -154,7 +128,8 @@ namespace sm::ntfs
                 attribute.nonResident = At<std::uint8_t>(header, kNonResident) != 0;
                 attribute.flags = At<std::uint16_t>(header, kAttributeFlags);
                 std::optional<std::span<std::byte const>> const name =
-                    Slice(header, At<std::uint16_t>(header, kNameOffset), At<std::uint8_t>(header, kNameLength) * std::size_t{ 2 });
+                    Slice(header, At<std::uint16_t>(header, kNameOffset),
+                          At<std::uint8_t>(header, kNameLength) * std::size_t{ 2 });
                 if (!name)
                 {
                     return false;
@@ -219,7 +194,8 @@ namespace sm::ntfs
         {
         public:
             explicit AlignedBuffer(std::size_t size)
-                : memory_(static_cast<std::byte*>(VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE))),
+                : memory_(
+                      static_cast<std::byte*>(VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE))),
                   size_(size)
             {
                 if (!memory_)
@@ -238,11 +214,6 @@ namespace sm::ntfs
             std::unique_ptr<std::byte, Free> memory_;
             std::size_t size_;
         };
-
-        std::uint32_t Record32(std::uint64_t record) noexcept
-        {
-            return record <= UINT32_MAX ? static_cast<std::uint32_t>(record) : 0;
-        }
 
         // The time now, as a FILETIME.
         std::uint64_t Now() noexcept
@@ -333,8 +304,7 @@ namespace sm::ntfs
 
     bool FileRecord::IsAlias() const noexcept
     {
-        constexpr std::uint32_t kNameSurrogate = 0x20000000;  // IsReparseTagNameSurrogate
-        return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 && (reparseTag & kNameSurrogate) != 0;
+        return sm::IsAlias(attributes, reparseTag);
     }
 
     bool ApplyFixups(std::span<std::byte> record) noexcept
@@ -388,7 +358,8 @@ namespace sm::ntfs
             }
             std::size_t const lengthSize = header & 0x0Fu;
             std::size_t const deltaSize = header >> 4u;
-            if (lengthSize == 0 || lengthSize > 8 || deltaSize > 8 || mappingPairs.size() - offset < lengthSize + deltaSize)
+            if (lengthSize == 0 || lengthSize > 8 || deltaSize > 8 ||
+                mappingPairs.size() - offset < lengthSize + deltaSize)
             {
                 return false;
             }
@@ -477,10 +448,10 @@ namespace sm::ntfs
                 name.parent = RecordOf(At<std::uint64_t>(value, kNameParent));
                 name.offset = static_cast<std::uint32_t>(out.nameText.size());
                 name.length = static_cast<std::uint16_t>(characters);
-                for (std::size_t i = 0; i < characters; ++i)
-                {
-                    out.nameText.push_back(static_cast<wchar_t>(At<std::uint16_t>(value, kNameText + i * 2)));
-                }
+                // The whole name at once: its length was checked against the value above.
+                static_assert(sizeof(wchar_t) == sizeof(std::uint16_t));
+                out.nameText.resize(out.nameText.size() + characters);
+                std::memcpy(out.nameText.data() + name.offset, value.data() + kNameText, characters * sizeof(wchar_t));
                 out.names.push_back(name);
                 break;
             }
@@ -513,8 +484,7 @@ namespace sm::ntfs
                     out.reparseTag = At<std::uint32_t>(attribute.value, 0);
                 }
                 break;
-            default:
-                break;
+            default: break;
             }
         });
         if (out.reparseTag == 0)
@@ -554,14 +524,15 @@ namespace sm::ntfs
         }
         NTFS_VOLUME_DATA_BUFFER data{};
         DWORD returned = 0;
-        if (!DeviceIoControl(volume.handle_.get(), FSCTL_GET_NTFS_VOLUME_DATA, nullptr, 0, &data, sizeof(data), &returned,
-                             nullptr))
+        if (!DeviceIoControl(volume.handle_.get(), FSCTL_GET_NTFS_VOLUME_DATA, nullptr, 0, &data, sizeof(data),
+                             &returned, nullptr))
         {
             return std::nullopt;  // not NTFS
         }
         // Unbuffered reads come in whole sectors: records must be whole sectors too.
         if (data.BytesPerCluster == 0 || data.BytesPerSector == 0 || data.BytesPerFileRecordSegment < kFixupStride ||
-            data.BytesPerFileRecordSegment % kFixupStride != 0 || data.BytesPerFileRecordSegment % data.BytesPerSector != 0 ||
+            data.BytesPerFileRecordSegment % kFixupStride != 0 ||
+            data.BytesPerFileRecordSegment % data.BytesPerSector != 0 ||
             data.BytesPerCluster % data.BytesPerSector != 0 || data.MftValidDataLength.QuadPart <= 0 ||
             data.MftStartLcn.QuadPart < 0)
         {
@@ -614,8 +585,8 @@ namespace sm::ntfs
                 return false;
             }
             std::uint64_t const take = std::min(extent.clusters, clusters - done);
-            std::span<std::byte> const target =
-                buffer.Span().subspan(static_cast<std::size_t>(done * bytesPerCluster_), static_cast<std::size_t>(take * bytesPerCluster_));
+            std::span<std::byte> const target = buffer.Span().subspan(
+                static_cast<std::size_t>(done * bytesPerCluster_), static_cast<std::size_t>(take * bytesPerCluster_));
             if (extent.lcn < 0)
             {
                 std::ranges::fill(target, std::byte{ 0 });
@@ -636,7 +607,8 @@ namespace sm::ntfs
         }
         // A list starts with the file's standard information, in its own record.
         std::span<std::byte const> const list = buffer.Span().first(static_cast<std::size_t>(file.listLength));
-        if (At<std::uint32_t>(list, 0) != kStandardInformation || RecordOf(At<std::uint64_t>(list, kListEntryRecord)) != file.number)
+        if (At<std::uint32_t>(list, 0) != kStandardInformation ||
+            RecordOf(At<std::uint64_t>(list, kListEntryRecord)) != file.number)
         {
             return false;
         }
@@ -764,8 +736,10 @@ namespace sm::ntfs
     Volume::ReadStatus Volume::ReadAll(std::stop_token const& stop,
                                        std::function<void(std::uint64_t, std::span<std::byte>)> const& consume) const
     {
+        // Larger blocks or more reads at once do not read faster: on a fast
+        // SSD six 4 MB reads already keep it at full speed.
         constexpr std::size_t kBlockBytes = std::size_t{ 4 } << 20;
-        constexpr std::size_t kInFlight = 6;  // solid-state drives serve several reads at once
+        constexpr std::size_t kInFlight = 6;
         std::size_t const perBlock = std::max<std::size_t>(1, kBlockBytes / recordSize_);
 
         // Blocks of whole records, each within one run of the MFT.
@@ -784,9 +758,13 @@ namespace sm::ntfs
             aligned = aligned && begin % recordSize_ == 0 && end % recordSize_ == 0;
             for (std::uint64_t record = begin / recordSize_; record < std::min(end / recordSize_, recordCount_);)
             {
-                auto const count = static_cast<std::size_t>(std::min<std::uint64_t>(perBlock, std::min(end / recordSize_, recordCount_) - record));
+                auto const count = static_cast<std::size_t>(
+                    std::min<std::uint64_t>(perBlock, std::min(end / recordSize_, recordCount_) - record));
                 std::int64_t const offset =
-                    extent.lcn < 0 ? -1 : static_cast<std::int64_t>(static_cast<std::uint64_t>(extent.lcn) * bytesPerCluster_ + record * recordSize_ - begin);
+                    extent.lcn < 0
+                        ? -1
+                        : static_cast<std::int64_t>(static_cast<std::uint64_t>(extent.lcn) * bytesPerCluster_ +
+                                                    record * recordSize_ - begin);
                 blocks.push_back({ record, count, offset });
                 record += count;
             }
@@ -813,8 +791,9 @@ namespace sm::ntfs
             return ReadStatus::Done;
         }
 
-        wil::unique_hfile const file(CreateFileW(device_.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                                                 OPEN_EXISTING, FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, nullptr));
+        wil::unique_hfile const file(CreateFileW(device_.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                                 nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING,
+                                                 nullptr));
         if (!file)
         {
             return ReadStatus::Failed;
@@ -928,7 +907,7 @@ namespace sm::ntfs
         // This is NTFS's working copy, with its fixups undone already (and the
         // check bytes possibly stale: they are only renewed on the way to the disk).
         return At<std::uint32_t>(std::span<std::byte const>(record), 0) == kFileSignature ? RecordRead::Ok
-                                                                                       : RecordRead::Failed;
+                                                                                          : RecordRead::Failed;
     }
 
     bool Volume::ReadFile(std::uint64_t number, FileRecord& out) const
@@ -938,12 +917,9 @@ namespace sm::ntfs
         std::vector<std::byte> bytes;
         switch (ReadCurrentRecord(number, bytes))
         {
-        case RecordRead::NotInUse:
-            return true;
-        case RecordRead::Failed:
-            return false;
-        case RecordRead::Ok:
-            break;
+        case RecordRead::NotInUse: return true;
+        case RecordRead::Failed: return false;
+        case RecordRead::Ok: break;
         }
         if (!ParseRecord(bytes, number, out))
         {
@@ -1033,8 +1009,16 @@ namespace sm::ntfs
             {
                 if (name.parent != record.number)
                 {
-                    directories_.push_back({ record.number, name.parent, record.ListedAttributes(), record.lastWriteTime,
-                                             std::wstring(record.Name(name)) });
+                    std::wstring_view const text = record.Name(name);
+                    Directory directory;
+                    directory.record = record.number;
+                    directory.parent = name.parent;
+                    directory.lastWriteTime = record.lastWriteTime;
+                    directory.attributes = record.ListedAttributes();
+                    directory.nameOffset = static_cast<std::uint32_t>(directoryNames_.size());
+                    directory.nameLength = static_cast<std::uint16_t>(text.size());
+                    directoryNames_.append(text);
+                    directories_.push_back(directory);
                     if (progress_ != nullptr)
                     {
                         progress_->folders.fetch_add(1, std::memory_order_relaxed);
@@ -1050,6 +1034,8 @@ namespace sm::ntfs
         }
 
         std::uint64_t const size = record.SizeOnDisk();
+        std::optional<std::uint32_t> const file = Record32(record.number);
+        std::size_t const firstLink = links_.size();
         std::uint64_t links = 0;
         for (FileName const& name : record.names)
         {
@@ -1065,17 +1051,79 @@ namespace sm::ntfs
             entry.logicalSize = record.length;
             entry.attributes = record.ListedAttributes();
             entry.lastWriteTime = record.lastWriteTime;
-            entry.record = Record32(record.number);
+            entry.record = file.value_or(0);
             entry.nameOffset = static_cast<std::uint32_t>(folder.names.size());
             entry.nameLength = static_cast<std::uint16_t>(text.size());
             folder.names.append(text);
             folder.entries.push_back(std::move(entry));
+            if (std::optional<std::uint32_t> const parent = Record32(name.parent); file && parent)
+            {
+                links_.push_back({ *file, *parent, static_cast<std::uint32_t>(folder.entries.size() - 1) });
+            }
             ++links;
+        }
+        if (links_.size() - firstLink < 2)
+        {
+            links_.resize(firstLink);  // a single name: nothing to count once
         }
         if (progress_ != nullptr && links != 0)
         {
             progress_->files.fetch_add(links, std::memory_order_relaxed);
             progress_->bytes.fetch_add(size * links, std::memory_order_relaxed);
+        }
+    }
+
+    // Each file listed under several names in the tree is counted under one
+    // of them, as CountHardLinksOnce chooses it: the one nearest the root,
+    // then in the folder with the lowest record, then the lowest.  Its other
+    // names take no space.  Runs before the folders are sorted: links_ still
+    // says where each name's entry is.
+    void TreeBuilder::CountLinksOnce(std::span<std::uint32_t const> depths)
+    {
+        std::ranges::sort(links_, {}, &Link::file);
+        for (std::size_t first = 0; first < links_.size();)
+        {
+            std::size_t last = first + 1;
+            while (last < links_.size() && links_[last].file == links_[first].file)
+            {
+                ++last;
+            }
+            std::span<Link const> const names(links_.data() + first, last - first);
+            first = last;
+
+            // Its names in the tree (those in folders left out of it do not count).
+            Link const* counted = nullptr;
+            std::size_t inTree = 0;
+            auto const nameOf = [this](Link const& link) { return index_.folders[link.folder]->Name(link.index); };
+            for (Link const& link : names)
+            {
+                if (index_.folders[link.folder] == nullptr)
+                {
+                    continue;
+                }
+                ++inTree;
+                if (counted == nullptr || depths[link.folder] < depths[counted->folder] ||
+                    (depths[link.folder] == depths[counted->folder] &&
+                     (link.folder < counted->folder ||
+                      (link.folder == counted->folder && nameOf(link) < nameOf(*counted)))))
+                {
+                    counted = &link;
+                }
+            }
+            if (inTree < 2)
+            {
+                continue;
+            }
+            hardLinks_ = true;
+            for (Link const& link : names)
+            {
+                if (&link != counted && index_.folders[link.folder] != nullptr)
+                {
+                    Entry& entry = index_.folders[link.folder]->entries[link.index];
+                    entry.size = 0;
+                    entry.countedElsewhere = true;
+                }
+            }
         }
     }
 
@@ -1096,72 +1144,178 @@ namespace sm::ntfs
         {
             Emit(deferred_[number]);
         }
-        deferred_.clear();
+        deferred_ = std::unordered_map<std::uint64_t, FileRecord>();
 
-        if (rootRecord >= folders_.size() || !folders_[static_cast<std::size_t>(rootRecord)])
+        std::size_t const records = folders_.size();
+        if (rootRecord >= records || !folders_[static_cast<std::size_t>(rootRecord)])
         {
             return nullptr;
         }
 
-        // Hang each folder in its parent, from the root down.  A folder that
-        // cannot be reached from the root (the file system's own, or one left
-        // over by a damaged record) is left out with everything in it.
-        std::ranges::sort(directories_, {}, &Directory::parent);
-        std::unique_ptr<Folder> root = std::move(folders_[static_cast<std::size_t>(rootRecord)]);
-        std::vector<std::pair<std::uint64_t, Folder*>> queue{ { rootRecord, root.get() } };
-        std::uint64_t folderCount = 0;
-        while (!queue.empty())
+        // Each folder's sub-folders: the directories bucketed by parent (a
+        // counting sort, as record numbers are dense), in record order.
+        std::vector<std::uint32_t> firstChild(records + 1, 0);  // bucket p: children[firstChild[p], firstChild[p + 1])
+        for (Directory const& directory : directories_)
         {
-            auto const [record, folder] = queue.back();
-            queue.pop_back();
-            auto const children = std::ranges::equal_range(directories_, record, {}, &Directory::parent);
-            for (Directory const& directory : children)
+            if (directory.parent < records)
             {
-                std::unique_ptr<Folder>& child = folders_[static_cast<std::size_t>(directory.record)];
-                if (!child)
-                {
-                    continue;  // already placed: a damaged volume naming a folder twice
-                }
-                child->parent = folder;
-                queue.emplace_back(directory.record, child.get());
-                Entry entry;
-                entry.kind = EntryKind::Folder;
-                entry.attributes = directory.attributes;
-                entry.lastWriteTime = directory.lastWriteTime;
-                entry.record = Record32(directory.record);
-                entry.nameOffset = static_cast<std::uint32_t>(folder->names.size());
-                entry.nameLength = static_cast<std::uint16_t>(directory.name.size());
-                folder->names.append(directory.name);
-                entry.child = std::move(child);
-                folder->entries.push_back(std::move(entry));
-                ++folderCount;
+                ++firstChild[static_cast<std::size_t>(directory.parent) + 1];
             }
         }
-        if (progress_ != nullptr)
+        std::partial_sum(firstChild.begin(), firstChild.end(), firstChild.begin());
+        std::vector<std::uint32_t> children(firstChild.back());
         {
-            progress_->folders.store(folderCount, std::memory_order_relaxed);
+            std::vector<std::uint32_t> next(firstChild.begin(), firstChild.end() - 1);
+            for (std::size_t i = 0; i < directories_.size(); ++i)
+            {
+                if (std::uint64_t const parent = directories_[i].parent; parent < records)
+                {
+                    children[next[static_cast<std::size_t>(parent)]++] = static_cast<std::uint32_t>(i);
+                }
+            }
         }
-        directories_.clear();
-        folders_.clear();  // frees what was left out
+        auto const childrenOf = [&](std::size_t parent) {
+            return std::span<std::uint32_t const>(children.data() + firstChild[parent],
+                                                  firstChild[parent + 1] - firstChild[parent]);
+        };
 
-        // Totals, from the deepest folders up.
-        std::vector<Folder*> order{ root.get() };
+        // Which folders the root leads to, level by level.  A folder it does
+        // not lead to (the file system's own, or one left over by a damaged
+        // record) is left out with everything in it.
+        constexpr std::uint32_t kUnreached = UINT32_MAX;
+        std::vector<std::uint32_t> depths(records, kUnreached);
+        std::vector<std::uint32_t> order{ static_cast<std::uint32_t>(rootRecord) };
+        depths[static_cast<std::size_t>(rootRecord)] = 0;
         for (std::size_t i = 0; i < order.size(); ++i)
         {
-            for (Entry const& entry : order[i]->entries)
+            std::uint32_t const parent = order[i];
+            for (std::uint32_t const child : childrenOf(parent))
             {
-                if (entry.child)
+                Directory& directory = directories_[child];
+                auto const record = static_cast<std::size_t>(directory.record);
+                if (record >= records || depths[record] != kUnreached || !folders_[record])
                 {
-                    order.push_back(entry.child.get());
+                    continue;  // placed already: a damaged volume naming a folder twice
                 }
+                directory.placed = true;
+                depths[record] = depths[parent] + 1;
+                order.push_back(static_cast<std::uint32_t>(record));
             }
         }
-        for (Folder* const folder : order | std::views::reverse)
+        index_.folders.assign(records, nullptr);
+        for (std::uint32_t const record : order)
         {
-            folder->entries.shrink_to_fit();
-            folder->names.shrink_to_fit();
-            UpdateTotals(*folder);
+            index_.folders[record] = folders_[record].get();
         }
+        std::unique_ptr<Folder> root = std::move(folders_[static_cast<std::size_t>(rootRecord)]);
+
+        // Hang each folder's sub-folders in it, its entries and names
+        // reallocated once at their final size - on every processor, as each
+        // folder is changed by its own task only.
+        constexpr std::size_t kFoldersPerTask = 256;
+        auto const chunks = [](std::size_t count) { return (count + kFoldersPerTask - 1) / kFoldersPerTask; };
+        ParallelFor(chunks(order.size()), [&](std::size_t chunk) {
+            std::size_t const end = std::min(order.size(), (chunk + 1) * kFoldersPerTask);
+            for (std::size_t i = chunk * kFoldersPerTask; i < end; ++i)
+            {
+                Folder& folder = *index_.folders[order[i]];
+                std::size_t entries = folder.entries.size();
+                std::size_t letters = folder.names.size();
+                for (std::uint32_t const child : childrenOf(order[i]))
+                {
+                    if (directories_[child].placed)
+                    {
+                        ++entries;
+                        letters += directories_[child].nameLength;
+                    }
+                }
+                // Vectors grow geometrically while records come in: give the slack back,
+                // which matters when millions of entries are held.
+                if (folder.entries.capacity() < entries || folder.entries.capacity() - entries > 8)
+                {
+                    std::vector<Entry> exact;
+                    exact.reserve(entries);
+                    std::ranges::move(folder.entries, std::back_inserter(exact));
+                    folder.entries.swap(exact);
+                }
+                if (folder.names.capacity() < letters || folder.names.capacity() - letters > 64)
+                {
+                    std::wstring exact;
+                    exact.reserve(letters);
+                    exact.append(folder.names);
+                    folder.names.swap(exact);
+                }
+                for (std::uint32_t const child : childrenOf(order[i]))
+                {
+                    Directory const& directory = directories_[child];
+                    if (!directory.placed)
+                    {
+                        continue;
+                    }
+                    Entry entry;
+                    entry.kind = EntryKind::Folder;
+                    entry.attributes = directory.attributes;
+                    entry.lastWriteTime = directory.lastWriteTime;
+                    entry.record = Record32(directory.record).value_or(0);
+                    entry.nameOffset = static_cast<std::uint32_t>(folder.names.size());
+                    entry.nameLength = directory.nameLength;
+                    folder.names.append(
+                        std::wstring_view(directoryNames_).substr(directory.nameOffset, directory.nameLength));
+                    entry.child = std::move(folders_[static_cast<std::size_t>(directory.record)]);
+                    entry.child->parent = &folder;
+                    folder.entries.push_back(std::move(entry));
+                }
+            }
+        });
+        if (progress_ != nullptr)
+        {
+            progress_->folders.store(order.size() - 1, std::memory_order_relaxed);
+        }
+
+        CountLinksOnce(depths);
+        // Done with: their memory goes, and with folders_ what was left out of the tree.
+        directories_ = std::vector<Directory>();
+        directoryNames_ = std::wstring();
+        links_ = std::vector<Link>();
+        folders_ = std::vector<std::unique_ptr<Folder>>();
+
+        // Totals, from the deepest folders up: a level at a time, each level
+        // on every processor.  The large files are found on the way.
+        std::size_t levelEnd = order.size();
+        while (levelEnd > 0)
+        {
+            std::uint32_t const depth = depths[order[levelEnd - 1]];
+            std::size_t levelBegin = levelEnd;
+            while (levelBegin > 0 && depths[order[levelBegin - 1]] == depth)
+            {
+                --levelBegin;
+            }
+            std::span<std::uint32_t const> const level(order.data() + levelBegin, levelEnd - levelBegin);
+            std::vector<std::vector<std::uint32_t>> large(chunks(level.size()));
+            ParallelFor(large.size(), [&](std::size_t chunk) {
+                std::size_t const end = std::min(level.size(), (chunk + 1) * kFoldersPerTask);
+                for (std::size_t i = chunk * kFoldersPerTask; i < end; ++i)
+                {
+                    Folder& folder = *index_.folders[level[i]];
+                    UpdateTotals(folder);
+                    for (Entry const& entry : folder.entries)
+                    {
+                        if (entry.kind == EntryKind::File && entry.record != 0 &&
+                            (entry.size >= kLargeFile || entry.logicalSize >= kLargeFile))
+                        {
+                            large[chunk].push_back(entry.record);
+                        }
+                    }
+                }
+            });
+            for (std::vector<std::uint32_t> const& found : large)
+            {
+                index_.largeFiles.insert(index_.largeFiles.end(), found.begin(), found.end());
+            }
+            levelEnd = levelBegin;
+        }
+        std::ranges::sort(index_.largeFiles);
+        index_.largeFiles.erase(std::ranges::unique(index_.largeFiles).begin(), index_.largeFiles.end());
         return root;
     }
 
@@ -1179,19 +1333,59 @@ namespace sm::ntfs
         std::uint64_t const started = Now();
         progress.SetCurrentPath(root);
 
+        // Each block of records is decoded on every processor as soon as it
+        // is read, while the block before it goes into the tree: the builder
+        // takes the records one at a time, in order, one block behind.
+        struct Decoded
+        {
+            std::vector<FileRecord> records;  // kept from block to block, with their memory
+            std::vector<std::uint8_t> valid;  // records[i] is a file record
+            std::size_t count = 0;
+        };
+        // A quarter of a 4 MB block of 1 KB records each: four helpers decode
+        // a block well before the next one arrives, and waking more of them
+        // for every block would cost more processor time than they save.
+        constexpr std::size_t kRecordsPerTask = 1024;
         std::uint32_t const recordSize = ntfs->RecordSize();
         TreeBuilder builder(ntfs->RecordCount(), &progress);
-        FileRecord record;
-        Volume::ReadStatus const status = ntfs->ReadAll(stop, [&](std::uint64_t first, std::span<std::byte> records) {
-            for (std::size_t i = 0; i < records.size() / recordSize; ++i)
+        std::array<Decoded, 2> decoded;
+        std::size_t current = 0;  // decoded[current] takes the next block; the other one waits to be added
+        auto const add = [&builder](Decoded const& block) {
+            for (std::size_t i = 0; i < block.count; ++i)
             {
-                std::span<std::byte> const bytes = records.subspan(i * recordSize, recordSize);
-                record.Clear();
-                if (ApplyFixups(bytes) && ParseRecord(bytes, first + i, record))
+                if (block.valid[i] != 0)
                 {
-                    builder.Add(record);
+                    builder.Add(block.records[i]);
                 }
             }
+        };
+        Volume::ReadStatus const status = ntfs->ReadAll(stop, [&](std::uint64_t first, std::span<std::byte> bytes) {
+            Decoded& block = decoded[current];
+            Decoded const& previous = decoded[1 - current];
+            block.count = bytes.size() / recordSize;
+            if (block.records.size() < block.count)
+            {
+                block.records.resize(block.count);
+                block.valid.resize(block.count);
+            }
+            std::size_t const tasks = (block.count + kRecordsPerTask - 1) / kRecordsPerTask;
+            // Task 0 adds the previous block; the others decode this one, in place.
+            ParallelFor(tasks + 1, [&](std::size_t task) {
+                if (task == 0)
+                {
+                    add(previous);
+                    return;
+                }
+                std::size_t const end = std::min(block.count, task * kRecordsPerTask);
+                for (std::size_t i = (task - 1) * kRecordsPerTask; i < end; ++i)
+                {
+                    std::span<std::byte> const record = bytes.subspan(i * recordSize, recordSize);
+                    block.records[i].Clear();
+                    block.valid[i] = ApplyFixups(record) && ParseRecord(record, first + i, block.records[i]) ? 1 : 0;
+                }
+            });
+            decoded[1 - current].count = 0;  // added
+            current = 1 - current;
         });
         if (status == Volume::ReadStatus::Cancelled)
         {
@@ -1201,6 +1395,9 @@ namespace sm::ntfs
         {
             return std::nullopt;
         }
+        add(decoded[1 - current]);  // the last block
+        decoded = {};
+
         std::unique_ptr<Folder> folder = builder.Finish();
         if (!folder)
         {
@@ -1208,12 +1405,14 @@ namespace sm::ntfs
         }
         auto tree = std::make_unique<FolderTree>(std::move(folder), root, std::move(volume), addSpecialEntries);
         tree->method = ScanMethod::MasterFileTable;
-        tree->threads = 1;
+        tree->threads = ParallelThreads();
         tree->rootRecord = static_cast<std::uint32_t>(kRootRecord);
-        CountHardLinksOnce(*tree);
+        tree->hardLinks = builder.HardLinks();
 
         if (journal)
         {
+            // Kept for the reloads, which then need not walk the whole tree.
+            tree->journalIndex = builder.TakeIndex();
             // The disk can still hold older copies of records changed in the
             // moments before the read (NTFS writes them back lazily) and
             // during it.  The journal says which files those are; they are

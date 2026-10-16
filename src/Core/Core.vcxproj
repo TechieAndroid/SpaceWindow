@@ -60,16 +60,22 @@
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="FolderTree.h" />
+    <ClInclude Include="Backdrop.h" />
     <ClInclude Include="ChangeJournal.h" />
+    <ClInclude Include="Commands.h" />
+    <ClInclude Include="Fields.h" />
     <ClInclude Include="Format.h" />
     <ClInclude Include="FolderWatch.h" />
     <ClInclude Include="IoCancellation.h" />
+    <ClInclude Include="LabelFit.h" />
     <ClInclude Include="Lang.h" />
     <ClInclude Include="MapItem.h" />
     <ClInclude Include="Ntfs.h" />
     <ClInclude Include="Palette.h" />
+    <ClInclude Include="Parallel.h" />
     <ClInclude Include="PieLayout.h" />
     <ClInclude Include="Settings.h" />
+    <ClInclude Include="Text.h" />
     <ClInclude Include="Theme.h" />
     <ClInclude Include="TreemapLayout.h" />
     <ClInclude Include="ViewHistory.h" />
@@ -79,16 +85,21 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="FolderTree.cpp" />
+    <ClCompile Include="Backdrop.cpp" />
     <ClCompile Include="ChangeJournal.cpp" />
+    <ClCompile Include="Commands.cpp" />
     <ClCompile Include="Format.cpp" />
     <ClCompile Include="FolderWatch.cpp" />
     <ClCompile Include="IoCancellation.cpp" />
+    <ClCompile Include="LabelFit.cpp" />
     <ClCompile Include="Lang.cpp" />
     <ClCompile Include="MapItem.cpp" />
     <ClCompile Include="Ntfs.cpp" />
     <ClCompile Include="Palette.cpp" />
+    <ClCompile Include="Parallel.cpp" />
     <ClCompile Include="PieLayout.cpp" />
     <ClCompile Include="Settings.cpp" />
+    <ClCompile Include="Text.cpp" />
     <ClCompile Include="Theme.cpp" />
     <ClCompile Include="TreemapLayout.cpp" />
     <ClCompile Include="ViewHistory.cpp" />

@@ -38,6 +38,17 @@ namespace sm::ntfs
         return fileReference & 0x0000'FFFF'FFFF'FFFFull;
     }
 
+    // A record number as a tree keeps it (Entry::record); nothing if it does
+    // not fit (no NTFS volume has 4 billion files, but a damaged one may say so).
+    constexpr std::optional<std::uint32_t> Record32(std::uint64_t record) noexcept
+    {
+        if (record > UINT32_MAX)
+        {
+            return std::nullopt;
+        }
+        return static_cast<std::uint32_t>(record);
+    }
+
     inline constexpr std::uint64_t kRootRecord = 5;        // the root folder
     inline constexpr std::uint64_t kFirstUserRecord = 24;  // records below belong to the file system itself
 
@@ -53,27 +64,27 @@ namespace sm::ntfs
     // A run of clusters of a non-resident attribute.
     struct Extent
     {
-        std::uint64_t vcn = 0;       // first cluster within the attribute
+        std::uint64_t vcn = 0;  // first cluster within the attribute
         std::uint64_t clusters = 0;
-        std::int64_t lcn = -1;       // first cluster on the volume; -1 for a sparse run (no clusters)
+        std::int64_t lcn = -1;  // first cluster on the volume; -1 for a sparse run (no clusters)
     };
 
     // What a file's record - and its extension records, once merged - say about it.
     struct FileRecord
     {
         std::uint64_t number = 0;
-        std::uint64_t base = 0;            // an extension record: the record number of its base record
+        std::uint64_t base = 0;  // an extension record: the record number of its base record
         bool inUse = false;
         bool directory = false;
-        bool hasAttributeList = false;     // some attributes live in extension records
+        bool hasAttributeList = false;  // some attributes live in extension records
         bool hasStandardInformation = false;
-        bool hasData = false;              // the sizes of the unnamed data stream were found
-        std::uint32_t attributes = 0;      // FILE_ATTRIBUTE_*, without FILE_ATTRIBUTE_DIRECTORY
+        bool hasData = false;          // the sizes of the unnamed data stream were found
+        std::uint32_t attributes = 0;  // FILE_ATTRIBUTE_*, without FILE_ATTRIBUTE_DIRECTORY
         std::uint32_t reparseTag = 0;
-        std::uint64_t lastWriteTime = 0;   // FILETIME
-        std::uint64_t allocated = 0;       // bytes on disk of the unnamed data stream
-        std::uint64_t length = 0;          // its length in bytes
-        std::uint64_t wofAllocated = 0;    // bytes on disk of "WofCompressedData" (Windows' compressed files)
+        std::uint64_t lastWriteTime = 0;  // FILETIME
+        std::uint64_t allocated = 0;      // bytes on disk of the unnamed data stream
+        std::uint64_t length = 0;         // its length in bytes
+        std::uint64_t wofAllocated = 0;   // bytes on disk of "WofCompressedData" (Windows' compressed files)
         std::vector<FileName> names;
         std::wstring nameText;
         std::vector<std::uint64_t> extensions;  // records the attribute list points to
@@ -191,26 +202,49 @@ namespace sm::ntfs
 
         void Add(FileRecord const& record);
 
-        // The tree below `rootRecord`, totalled and sorted.
+        // The tree below `rootRecord`, totalled and sorted, each file listed
+        // under several names counted under one of them, as CountHardLinksOnce
+        // would.  Spread over the processors (Parallel.h).
         std::unique_ptr<Folder> Finish(std::uint64_t rootRecord = kRootRecord);
+
+        // What Finish found out on the way, for the tree: its folders by
+        // record and its large files (FolderTree::journalIndex), and whether
+        // a file is listed under several names (FolderTree::hardLinks).
+        JournalIndex TakeIndex() noexcept { return std::move(index_); }
+        bool HardLinks() const noexcept { return hardLinks_; }
 
     private:
         struct Directory
         {
             std::uint64_t record = 0;
             std::uint64_t parent = 0;
-            std::uint32_t attributes = 0;
             std::uint64_t lastWriteTime = 0;
-            std::wstring name;
+            std::uint32_t attributes = 0;
+            std::uint32_t nameOffset = 0;  // in directoryNames_
+            std::uint16_t nameLength = 0;
+            bool placed = false;  // hung in its parent (a damaged volume can name a folder twice)
+        };
+
+        // A name of a file listed under several: where its entry went.
+        struct Link
+        {
+            std::uint32_t file = 0;    // the file's record
+            std::uint32_t folder = 0;  // the record of the folder that lists it
+            std::uint32_t index = 0;   // of its entry there, until Finish sorts the folder
         };
 
         void Emit(FileRecord const& record);
         Folder& FolderOf(std::uint64_t record);
+        void CountLinksOnce(std::span<std::uint32_t const> depths);
 
         ScanProgress* progress_;
         std::vector<std::unique_ptr<Folder>> folders_;  // by record number, until attached to the tree
         std::vector<Directory> directories_;
+        std::wstring directoryNames_;  // the names of directories_, back to back
+        std::vector<Link> links_;
         std::unordered_map<std::uint64_t, FileRecord> deferred_;  // files with extension records, by base record
+        JournalIndex index_;
+        bool hardLinks_ = false;
     };
 
     // Scans a whole NTFS volume through its MFT.  `root` is its mount point.
