@@ -34,7 +34,7 @@ namespace sm
         float const space = room - dotsWidth;
         float used = 0.0f;
         std::size_t letters = 0;
-        std::size_t length = 0;  // UTF-16 code units
+        std::size_t length = 0;  // wide characters
         for (Cluster const& cluster : clusters)
         {
             if (used + cluster.width > space)

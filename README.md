@@ -56,6 +56,8 @@ by Sean Werkema; please report SpaceWindow issues here, not to him.
 
 ## Download
 
+### Windows
+
 From the [Releases](../../releases/latest) page, download either:
 
 - **The installer**, `SpaceWindow-<version>-x64-setup.exe` (or
@@ -78,6 +80,37 @@ and tick **Unblock** before extracting.) You can always
 
 **Requirements:** Windows 11, x64 or ARM64. (The app declares Windows 10
 version 1809 as its minimum, but only Windows 11 has been tested.)
+
+### Linux
+
+From the [Releases](../../releases/latest) page, download
+`SpaceWindow-<version>-x86_64.AppImage` (`-aarch64` for 64-bit Arm): one
+file with Qt inside, for any distribution with glibc 2.35 or later - Ubuntu
+22.04, Debian 12, Fedora 36 and later - on X11 or Wayland. It is tested on
+Ubuntu 22.04 and 24.04, Debian 12, Fedora 44 and Arch Linux. Make it
+executable and run it; nothing is installed:
+
+```sh
+chmod +x SpaceWindow-*-x86_64.AppImage
+./SpaceWindow-*-x86_64.AppImage
+```
+
+Or install a package, with a menu entry, on the system's Qt: the release's
+`.deb` is for Ubuntu 24.04 and later, its `.rpm` for Fedora 44, and on Arch
+Linux `makepkg -si` in `packaging/arch` builds and installs one. (For other
+distributions, `cpack` makes one: see [Building on Linux](#building-on-linux).)
+
+```sh
+sudo apt install ./spacewindow_<version>_amd64.deb
+sudo dnf install ./spacewindow-<version>-1.fc44.x86_64.rpm
+```
+
+Settings are kept in `~/.config/SpaceWindow`, the window's size and place in
+`~/.local/state/SpaceWindow`, and theme files go in
+`~/.config/SpaceWindow/Themes` (or a `Themes` folder next to the AppImage).
+To scan the whole system, run it as usual: folders you cannot read are listed
+as unreadable, as on Windows. To build it yourself, see
+[Building on Linux](#building-on-linux).
 
 ## Using SpaceWindow
 
@@ -655,18 +688,83 @@ brushes by; `src/App/ChromeThemeKeys.h` lists them, generated from the Windows
 App SDK's `generic.xaml`. After updating the Windows App SDK, run
 `python tools\make_theme_keys.py` to bring it up to date.
 
+### Building on Linux
+
+SpaceWindow also builds on Linux as a Qt 6 app, on the same scanner, layouts,
+themes and settings: see [docs/linux-port.md](docs/linux-port.md) for how it
+is put together and what differs from Windows.
+
+![SpaceWindow on Linux, showing a home folder](docs/screenshots/linux-treemap.png)
+
+You need a C++20 compiler (tested with GCC 16 and Clang 21; CI uses Ubuntu
+24.04's GCC 13 and Clang 18), CMake 3.25 or later and Qt 6.4 or later
+(`qt6-base-dev`, and `qt6-qpa-plugins` for the tests; without Qt, only the
+core library and its tests are built):
+
+```sh
+cmake --preset linux-release
+cmake --build --preset linux-release
+ctest --preset linux-release                 # unit tests, smoke tests of the window, build checks
+out/build/linux-release/bin/spacewindow      # the app (add a folder to scan it at once)
+cmake --install out/build/linux-release --prefix ~/.local   # with a menu entry, icons and AppStream data
+```
+
+`linux-debug`, `linux-clang` and `linux-asan` (AddressSanitizer and
+UndefinedBehaviorSanitizer) are the other presets; `linux-tidy` builds with
+clang-tidy, failing on any finding. `-DSPACEWINDOW_QT_BASELINE=ON` builds
+the app with only what Qt 6.4 has, to try the fallbacks with a newer Qt.
+`out/build/linux-release/bin/CoreTests --bench /usr` times the scanner.
+
+Packages: `bash packaging/appimage/build-appimage.sh` builds an AppImage (it
+downloads linuxdeploy, pinned and checksummed). In a build folder,
+`cpack -G DEB` or `cpack -G RPM` makes a package of what `cmake --install`
+installs, depending on the libraries of the system it is made on - so make
+it on the distribution it is for:
+
+```sh
+cmake -S . -B out/build/package -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build out/build/package
+cd out/build/package && cpack -G DEB         # or RPM (needs rpm-build)
+```
+
+`packaging/arch/PKGBUILD` builds the Arch Linux package from the release's
+tag (`makepkg -si`), and
+`packaging/flatpak/io.github.techieandroid.SpaceWindow.yml` is a Flatpak
+manifest (`flatpak-builder --user --install out/flatpak <manifest>`). The
+`.github/workflows` build and test both platforms; on a version tag, the
+Linux one also makes a draft release with the AppImages, the `.deb` and the
+`.rpm`.
+
+On Wayland, programs cannot place their windows: SpaceWindow remembers its
+size and whether it was maximized, and the desktop chooses where it opens.
+To keep it in one place, use the desktop's window rules - in KDE Plasma,
+right-click the title bar, *More Actions > Configure Special Window Settings*,
+add *Position* and *Size*, and set them to *Remember*.
+
 ### Publishing a release
 
-Set the version in `build.ps1` (and the files its comment names), then build
-both platforms: `.\build.ps1` and `.\build.ps1 -Platform ARM64`. With Inno
-Setup installed, `artifacts\` then holds each platform's folder, `.zip` and
-installer, and the release's winget manifest in
-`artifacts\winget\manifests\r\recompiler\SpaceWindow\<version>\`. The
-manifest expects the installers in the GitHub release `v<version>` and pins
-their SHA-256 hashes, so upload the files of that same build, unchanged.
+Set the version in `VERSION`, and where the Windows resources state it
+(`src\App\SpaceWindow.rc`, `app.manifest`, `kVersion` in
+`MainWindowShared.h`) and in the release notes of
+`packaging/linux/io.github.techieandroid.SpaceWindow.metainfo.xml`:
+`tools/check_versions.py` (a CTest test) checks they agree. Give that
+release entry the release's date too.
 
-1. Create the release `v<version>` on GitHub and upload the two `.zip` files
-   and the two installers.
+Commit, and push the tag: `git tag v<version>` and
+`git push origin v<version>`. The Linux workflow then builds and tests
+everything once more and makes a draft release `v<version>` with the two
+AppImages, the `.deb` and the `.rpm` (if a job fails, fix it and run the
+workflow again: it replaces the files of its draft).
+
+Then build both Windows platforms: `.\build.ps1` and
+`.\build.ps1 -Platform ARM64`. With Inno Setup installed, `artifacts\` then
+holds each platform's folder, `.zip` and installer, and the release's winget
+manifest in `artifacts\winget\manifests\r\recompiler\SpaceWindow\<version>\`.
+The manifest expects the installers in the GitHub release `v<version>` and
+pins their SHA-256 hashes, so upload the files of that same build, unchanged.
+
+1. Upload the two `.zip` files and the two installers to the draft release,
+   write its notes, and publish it.
 2. Check the manifest and try it, installing from the release (the first
    command once, as administrator):
 
@@ -691,18 +789,32 @@ Later versions can skip the manifest: after uploading their installers,
 `wingetcreate update recompiler.SpaceWindow --version <version> --urls
 <x64 installer URL> <arm64 installer URL> --submit` writes and submits it.
 
+For Arch Linux, once the release is published, update the AUR package as
+`packaging/arch/PKGBUILD` says at its top: set `pkgver`, run `updpkgsums`
+and `makepkg --printsrcinfo > .SRCINFO`, and push both files to the AUR.
+
 ### Project layout
 
 ```
 SpaceWindow.slnx                  Visual Studio solution
 build.ps1                         restore, build, test, check and package
+VERSION                           the version, read by build.ps1 and CMake
+CMakeLists.txt, CMakePresets.json the Linux build (CMake)
+src/Presenter/                    the window's logic without a toolkit (the Qt app's; WinUI's to follow)
+src/AppQt/                        the Qt 6 app (Linux)
+tests/AppQt/                      a smoke test of the Qt app
+packaging/linux/                  the desktop entry, AppStream metainfo and icons
+packaging/appimage/, flatpak/,    the AppImage build, the Flatpak manifest and the Arch Linux package
+  arch/                           (the .deb and .rpm are CPack's, set up in CMakeLists.txt)
+.github/workflows/                CI: both platforms built and tested; the Linux packages drafted into releases
 build/SpaceWindow.Cpp.props       compiler and linker settings shared by all projects
 src/Core/                         static library: scanner, layouts, settings, text, colours
 src/App/                          the WinUI 3 app
 tests/CoreTests/                  unit tests, drive tests, the scanner benchmark and comparison
 tests/Ui/                         a smoke test of the app, without keyboard or mouse input
 installer/SpaceWindow.iss         the installer (Inno Setup), built by build.ps1
-tools/                            clang-tidy runner, window capture, winget manifest, icon and theme-key generators
+tools/                            clang-tidy runner, window capture, winget manifest, icon and theme-key
+                                  generators, and the checks that keep the two builds in step
 .clang-format                     how the code is formatted (checked by build.ps1 -Analyze)
 docs/screenshots/                 the pictures in this README
 ```
@@ -717,7 +829,8 @@ license notice ([LICENSE.txt](LICENSE.txt)) with your copies.
 Bug reports, ideas and pull requests are welcome. Before sending a pull
 request, please run `.\build.ps1 -All` (it builds, tests and runs the
 analysis, formatting and sanitizer checks) and `tests\Ui\Smoke.ps1`, and
-keep them free of warnings.
+keep them free of warnings; on Linux, `ctest` in the `linux-release` and
+`linux-asan` presets, and a `linux-tidy` build.
 
 ## Support this project
 

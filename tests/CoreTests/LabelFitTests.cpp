@@ -39,10 +39,12 @@ TEST_CASE(FolderNamesAreShortenedToFiveLettersAtLeast)
     // No space before the dots.
     CHECK_EQ(sm::FitName(L"Program Files", Letters(L"Program Files"), 100.0f, 15.0f), std::wstring(L"Program..."));
 
-    // A letter is whole or not at all: an emoji is two code units, one letter.
+    // A letter is whole or not at all: an emoji is two code units, one letter
+    // (one code unit too, where wide characters hold whole code points).
     std::wstring const name = L"ab\U0001F600cdefg";
-    std::vector<sm::Cluster> clusters{ { 10.0f, 1 }, { 10.0f, 1 }, { 20.0f, 2 }, { 10.0f, 1 },
-                                       { 10.0f, 1 }, { 10.0f, 1 }, { 10.0f, 1 }, { 10.0f, 1 } };
+    constexpr auto kEmoji = static_cast<std::uint16_t>(sizeof(wchar_t) == 2 ? 2 : 1);
+    std::vector<sm::Cluster> clusters{ { 10.0f, 1 }, { 10.0f, 1 }, { 20.0f, kEmoji }, { 10.0f, 1 },
+                                       { 10.0f, 1 }, { 10.0f, 1 }, { 10.0f, 1 },      { 10.0f, 1 } };
     CHECK_EQ(sm::FitName(name, clusters, 70.0f, 10.0f), std::wstring(L"ab\U0001F600cd..."));
     clusters[2].width = 41.0f;  // too wide to go before the dots: the name would stop at two letters
     CHECK(sm::FitName(name, clusters, 70.0f, 10.0f).empty());

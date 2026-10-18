@@ -9,6 +9,18 @@ namespace sm
 {
     namespace
     {
+#ifndef _WIN32
+        // Windows' default 3-D colours, for the "Windows Colors" scheme elsewhere.
+        using COLORREF = std::uint32_t;
+        constexpr int COLOR_3DSHADOW = 16;
+        constexpr int COLOR_3DFACE = 15;
+        constexpr int COLOR_3DHILIGHT = 20;
+        constexpr COLORREF GetSysColor(int index) noexcept
+        {
+            return index == COLOR_3DFACE ? 0xF0F0F0 : index == COLOR_3DHILIGHT ? 0xFFFFFF : 0xA0A0A0;
+        }
+#endif
+
         constexpr Rgb FromColorRef(COLORREF color) noexcept
         {
             return { static_cast<std::uint8_t>(color & 0xFF), static_cast<std::uint8_t>((color >> 8) & 0xFF),

@@ -1,0 +1,44 @@
+# The Windows build, as a developer runs it: build.ps1 -All builds the WinUI
+# app, runs the unit tests (also under AddressSanitizer), MSVC code analysis,
+# clang-tidy and the formatting check, and publishes the portable folder and
+# the installer.
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build.ps1 -All
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Visual Studio 2026 Build Tools with the C++ WinUI components (README.md, "Prerequisites")
+        shell: pwsh
+        run: |
+          Invoke-WebRequest 'https://aka.ms/vs/18/stable/vs_buildtools.exe' -OutFile vs_buildtools.exe
+          $components = 'Microsoft.VisualStudio.Workload.VCTools', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+              'Microsoft.VisualStudio.Component.Windows11SDK.26100', 'Microsoft.VisualStudio.ComponentGroup.UWP.BuildTools',
+              'Microsoft.VisualStudio.Component.VC.ASAN', 'Microsoft.VisualStudio.Component.VC.Llvm.Clang'
+          $arguments = @('--quiet', '--wait', '--norestart', '--nocache') + ($components | ForEach-Object { '--add', $_ })
+          $setup = Start-Process .\vs_buildtools.exe -ArgumentList $arguments -Wait -PassThru
+          # 3010: installed, and a restart would finish something else (nothing the build needs).
+          if ($setup.ExitCode -notin 0, 3010) { throw "Build Tools setup failed with exit code $($setup.ExitCode)" }
+      - name: Inno Setup 6.7 or later (the installer's dynamic modern style needs it)
+        run: choco upgrade innosetup -y --no-progress
+      - name: Build, test, analyze and publish
+        shell: pwsh
+        run: .\build.ps1 -All
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpaceWindow-Windows
+          path: |
+            artifacts/*.zip
+            artifacts/*.exe

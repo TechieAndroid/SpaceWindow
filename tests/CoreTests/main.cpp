@@ -5,11 +5,16 @@
 //   CoreTests.exe --volume [filter]  ... including those that read a drive directly (as administrator)
 //   CoreTests.exe --bench <path> [threads...]  benchmark the scanner on a real folder or drive
 //   CoreTests.exe --compare <path>   compare the master file table scan with the folder scanner
+//
+// Elsewhere than on Windows the drive tests and the comparison are left out:
+// they read NTFS drives directly.  The benchmark is BenchPosix.cpp's.
 #include "pch.h"
 #include "TestHarness.h"
 
 int RunBenchmark(std::wstring_view path, std::span<unsigned const> threadCounts);
+#ifdef _WIN32
 int RunCompare(std::wstring_view path);
+#endif
 
 namespace test
 {
@@ -21,6 +26,9 @@ namespace test
 
     std::string ToUtf8(std::wstring_view text)
     {
+#ifndef _WIN32
+        return sm::posix::ToNative(text);
+#else
         if (text.empty())
         {
             return {};
@@ -31,6 +39,7 @@ namespace test
         WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), result.data(), length, nullptr,
                             nullptr);
         return result;
+#endif
     }
 
     void Fail(std::string const& message, std::source_location location)
@@ -39,6 +48,7 @@ namespace test
     }
 }
 
+#ifdef _WIN32
 int wmain(int argc, wchar_t** argv)
 {
     SetConsoleOutputCP(CP_UTF8);
@@ -59,6 +69,34 @@ int wmain(int argc, wchar_t** argv)
     {
         return RunCompare(argv[2]);
     }
+#else
+int main(int argc, char** narrow)
+{
+    std::vector<std::wstring> arguments;
+    arguments.reserve(static_cast<std::size_t>(argc));
+    for (int i = 0; i < argc; ++i)
+    {
+        arguments.push_back(sm::posix::FromNative(narrow[i]));
+    }
+    std::vector<wchar_t const*> argv;
+    argv.reserve(arguments.size());
+    for (std::wstring const& argument : arguments)
+    {
+        argv.push_back(argument.c_str());
+    }
+    if (argc >= 3 && std::wstring_view(argv[1]) == L"--bench")
+    {
+        std::vector<unsigned> threadCounts;
+        for (int i = 3; i < argc; ++i)
+        {
+            if (long const count = std::wcstol(argv[i], nullptr, 10); count > 0)
+            {
+                threadCounts.push_back(static_cast<unsigned>(count));
+            }
+        }
+        return RunBenchmark(argv[2], threadCounts);
+    }
+#endif
     int first = 1;
     bool volume = false;
     if (argc >= 2 && std::wstring_view(argv[1]) == L"--volume")

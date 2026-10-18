@@ -1,0 +1,5 @@
+// SpaceWindow's version and desktop id, from CMakeLists.txt (generated: do not edit).
+#pragma once
+
+#define SPACEWINDOW_VERSION "@PROJECT_VERSION@"
+#define SPACEWINDOW_APP_ID "@SPACEWINDOW_APP_ID@"  // the .desktop file's name, the icon's, the Wayland app id

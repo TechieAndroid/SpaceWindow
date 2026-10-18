@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=SpaceWindow
+GenericName=Disk Usage Analyzer
+GenericName[fr]=Analyseur d'utilisation des disques
+Comment=See where your disk space goes
+Comment[fr]=Découvrez où va votre espace disque
+Exec=spacewindow %f
+Icon=io.github.techieandroid.SpaceWindow
+Terminal=false
+Categories=Qt;System;Filesystem;
+Keywords=disk;space;usage;treemap;storage;du;
+Keywords[fr]=disque;espace;utilisation;carte;stockage;du;
+StartupNotify=true
+StartupWMClass=spacewindow

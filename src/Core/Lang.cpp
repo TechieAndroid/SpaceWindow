@@ -14,6 +14,10 @@
 #include "pch.h"
 #include "Lang.h"
 
+#ifndef _WIN32
+#include <cstdlib>
+#endif
+
 namespace sm
 {
     namespace
@@ -401,6 +405,7 @@ namespace sm
 
     std::wstring_view DefaultLanguageCode()
     {
+#ifdef _WIN32
         ULONG count = 0;
         ULONG length = 0;
         if (!GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, nullptr, &length) || length == 0)
@@ -417,6 +422,28 @@ namespace sm
         // The buffer is a multi-string ("fr-FR\0en-US\0\0"); the first entry is the preference.
         std::wstring_view const languages{ buffer };
         std::wstring_view const preferred = languages.substr(0, languages.find(L'\0'));
+#else
+        // The first of $LANGUAGE's list, else the locale for messages: "fr_FR.UTF-8" -> "fr-FR".
+        std::string name;
+        for (char const* const variable : { "LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG" })
+        {
+            if (char const* const value = std::getenv(variable); value != nullptr && value[0] != '\0')
+            {
+                name = value;
+                name = name.substr(0, name.find(':'));
+                if (!name.empty())
+                {
+                    break;
+                }
+            }
+        }
+        std::wstring buffer;
+        for (char const c : name.substr(0, name.find_first_of(".@")))
+        {
+            buffer.push_back(c == '_' ? L'-' : static_cast<wchar_t>(static_cast<unsigned char>(c)));
+        }
+        std::wstring_view const preferred{ buffer };
+#endif
         if (StartsWithNoCase(preferred, L"fr"))
         {
             return kFrench.code;

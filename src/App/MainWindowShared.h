@@ -32,7 +32,7 @@ namespace winrt::SpaceWindow::implementation
     inline constexpr double kDefaultHeight = 740.0;
     inline constexpr double kMinimumWidth = 520.0;
     inline constexpr double kMinimumHeight = 400.0;
-    inline constexpr wchar_t kVersion[] = L"1.0.0";
+    inline constexpr wchar_t kVersion[] = L"1.1.0";
     inline constexpr wchar_t kSeparator[] = L"   ·   ";
 
     inline Windows::UI::Color ToColor(sm::Rgb color) noexcept

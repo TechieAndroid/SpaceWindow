@@ -78,6 +78,7 @@
     <ClInclude Include="Text.h" />
     <ClInclude Include="Theme.h" />
     <ClInclude Include="TreemapLayout.h" />
+    <ClInclude Include="ScopeExit.h" />
     <ClInclude Include="ViewHistory.h" />
   </ItemGroup>
   <ItemGroup>

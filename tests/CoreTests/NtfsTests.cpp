@@ -529,7 +529,7 @@ TEST_CASE(ChangeJournalPatchesTheTree)
     };
 
     sm::JournalChanges changes;
-    changes.position = sm::JournalPosition{ L"\\\\?\\Volume{test}", 7, 4242 };
+    changes.position = sm::JournalPosition{ L"\\\\?\\Volume{test}", 7, 4242, {} };
     // A file in a folder made in the same batch - listed before the folder itself.
     changes.files.push_back(changed(51, false, { { 50, L"new.txt" } }, { 50 }, 1000));
     // "Users" moves into a new folder "Home", contents and all.

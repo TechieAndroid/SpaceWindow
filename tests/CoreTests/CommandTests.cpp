@@ -2,6 +2,10 @@
 #include "pch.h"
 #include "TestHarness.h"
 
+#ifndef _WIN32
+#include <fstream>
+#endif
+
 #include "../../src/Core/Commands.h"
 #include "../../src/Core/Lang.h"
 
@@ -17,9 +21,12 @@ namespace
     }
 
     // A file of the repository, found from the test program:
-    // bin\<platform>\<configuration>\CoreTests\CoreTests.exe.
+    // bin\<platform>\<configuration>\CoreTests\CoreTests.exe (CMake says where it is).
     std::filesystem::path RepositoryFile(std::wstring_view name)
     {
+#ifdef SPACEWINDOW_SOURCE_DIR
+        return std::filesystem::path(SPACEWINDOW_SOURCE_DIR) / sm::posix::ToNative(name);
+#else
         std::wstring program(MAX_PATH, L'\0');
         DWORD length = 0;
         while ((length = GetModuleFileNameW(nullptr, program.data(), static_cast<DWORD>(program.size()))) ==
@@ -34,10 +41,16 @@ namespace
             root = root.parent_path();
         }
         return root / name;
+#endif
     }
 
     std::wstring ReadUtf8(std::filesystem::path const& path)
     {
+#ifndef _WIN32
+        std::ifstream file(path, std::ios::binary);
+        std::string const bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        return sm::posix::DecodeUtf8(bytes).value_or(std::wstring());
+#else
         std::string bytes;
         {
             wil::unique_hfile const file(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
@@ -59,6 +72,7 @@ namespace
         std::wstring text(static_cast<std::size_t>(length), L'\0');
         MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), text.data(), length);
         return text;
+#endif
     }
 }
 

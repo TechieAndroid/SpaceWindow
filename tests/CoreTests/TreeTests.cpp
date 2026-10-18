@@ -2,6 +2,9 @@
 #include "pch.h"
 #include "TestHarness.h"
 #include "TreeBuilder.h"
+#ifndef _WIN32
+#include "../../src/Core/Posix.h"
+#endif
 
 namespace
 {
@@ -170,3 +173,39 @@ TEST_CASE(RecountingSomeHardLinksMatchesRecountingAll)
     CHECK_EQ(some->Root()->SizeTotal(), std::uint64_t{ 4096 + 8192 });
     CHECK_EQ(asked, std::size_t{ 2 });  // once for each tree
 }
+
+#ifndef _WIN32
+TEST_CASE(HardLinksAtTheSameDepthGoToTheFolderWithTheLowerInode)
+{
+    // A reload numbers the files new to the tree in the order it meets them,
+    // not in that of their inodes, as a scan does: here folder Q got its
+    // number first.  The file is still counted where a fresh scan counts it,
+    // in P, the folder with the lower inode.
+    auto inodes = std::make_shared<sm::InodeTable>();
+    std::uint32_t const device = inodes->Device(42);
+    std::uint32_t const rootRecord = inodes->Intern(device, 10);
+    std::uint32_t const q = inodes->Intern(device, 300);
+    std::uint32_t const p = inodes->Intern(device, 200);
+    std::uint32_t const file = inodes->Intern(device, 400);
+    CHECK(q < p);
+
+    auto root = std::make_unique<sm::Folder>();
+    for (auto const& [name, record] : { std::pair{ L"P", p }, std::pair{ L"Q", q } })
+    {
+        sm::Folder& folder = test::AddFolder(*root, name);
+        Last(*root).record = record;
+        test::AddFile(folder, L"link.bin", 4096);
+        Last(folder).record = file;
+    }
+    test::Finish(*root);
+    auto tree = std::make_unique<sm::FolderTree>(std::move(root), L"/data/", sm::VolumeInfo{}, false);
+    tree->rootRecord = rootRecord;
+    tree->inodes = inodes;
+    sm::CountHardLinksOnce(*tree);
+
+    sm::Entry const* const inP = Named(*Named(*tree->Root(), L"P")->child, L"link.bin");
+    sm::Entry const* const inQ = Named(*Named(*tree->Root(), L"Q")->child, L"link.bin");
+    CHECK(!inP->countedElsewhere && inP->size == 4096);
+    CHECK(inQ->countedElsewhere && inQ->size == 0);
+}
+#endif

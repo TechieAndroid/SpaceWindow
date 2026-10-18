@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SpaceWindow's AppStream description: what software centres (GNOME Software,
+     KDE Discover, Flathub) show.  Check it with: appstreamcli validate <file> -->
+<component type="desktop-application">
+  <id>io.github.techieandroid.SpaceWindow</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>SpaceWindow</name>
+  <summary>See where your disk space goes</summary>
+  <summary xml:lang="fr">Découvrez où va votre espace disque</summary>
+  <developer id="io.github.techieandroid">
+    <name>recompiler</name>
+  </developer>
+
+  <description>
+    <p>
+      SpaceWindow shows a drive or a folder as a map of boxes, each as big as
+      the space it takes, folders holding their files and folders: what fills
+      the disk stands out at a glance. It is a modern take on SpaceMonger 1.4.0
+      by Sean Werkema.
+    </p>
+    <ul>
+      <li>Scans on every processor core, with a live map while it runs</li>
+      <li>Reloads in a moment: only the folders that changed are listed again</li>
+      <li>A treemap and two pie charts; zoom in and out, go back and forward</li>
+      <li>Open a file, show it in the file manager, or move it to the trash, from the map</li>
+      <li>Light, dark and colour themes, and theme files of your own</li>
+    </ul>
+    <p xml:lang="fr">
+      SpaceWindow montre un disque ou un dossier comme une carte de boîtes, chacune
+      aussi grande que l'espace qu'elle occupe : ce qui remplit le disque saute aux
+      yeux. C'est une version moderne de SpaceMonger 1.4.0 de Sean Werkema.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.techieandroid.SpaceWindow.desktop</launchable>
+  <provides>
+    <binary>spacewindow</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/TechieAndroid/SpaceWindow</url>
+  <url type="bugtracker">https://github.com/TechieAndroid/SpaceWindow/issues</url>
+  <url type="vcs-browser">https://github.com/TechieAndroid/SpaceWindow</url>
+
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">720</display_length>
+  </requires>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>A folder as a treemap</caption>
+      <image>https://raw.githubusercontent.com/TechieAndroid/SpaceWindow/main/docs/screenshots/linux-treemap.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The pie chart</caption>
+      <image>https://raw.githubusercontent.com/TechieAndroid/SpaceWindow/main/docs/screenshots/linux-pie-chart.png</image>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="1.1.0" date="2026-10-18">
+      <description>
+        <p>SpaceWindow runs on Linux, with everything the Windows version has: the treemap and pie charts, the background animations, themes, reloads of only what changed, and the trash.</p>
+      </description>
+    </release>
+    <release version="1.0.0" date="2026-10-16">
+      <description>
+        <p>The first release, for Windows; this version also builds and runs on Linux.</p>
+      </description>
+    </release>
+  </releases>
+</component>

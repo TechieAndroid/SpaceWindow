@@ -421,7 +421,7 @@ TEST_CASE(PieOfANestedTreeKeepsItsInvariants)
 
     for (int density = sm::Settings::kMinDensity; density <= sm::Settings::kMaxDensity; ++density)
     {
-        for (auto const [width, height] : { std::pair{ 1921, 1081 }, std::pair{ 3841, 2161 }, std::pair{ 120, 90 } })
+        for (auto const& [width, height] : { std::pair{ 1921, 1081 }, std::pair{ 3841, 2161 }, std::pair{ 120, 90 } })
         {
             sm::PieLayout pie;
             sm::PieOptions const options = sm::PieOptions::ForDensity(density, 1.5);

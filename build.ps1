@@ -36,7 +36,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = $PSScriptRoot
-$version = '1.0.0'  # keep in step with src\App\SpaceWindow.rc, app.manifest and kVersion in MainWindowShared.h
+# As CMakeLists.txt reads it.  src\App\SpaceWindow.rc, app.manifest and kVersion in MainWindowShared.h
+# state it too: tools\check_versions.py (a CTest test) checks they agree.
+$version = (Get-Content (Join-Path $root 'VERSION') -TotalCount 1).Trim()
 if ($All) { $Analyze = $true; $Sanitize = $true }
 
 function Step([string] $message) { Write-Host "`n==> $message" -ForegroundColor Cyan }

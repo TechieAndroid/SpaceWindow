@@ -6,7 +6,13 @@ rounded corners, title bands and soft shadows.  Standard library only.
 
     python make_icon.py <output-directory>
 
-writes SpaceWindow.ico (16-256 px) and SpaceWindow.png (256 px).
+writes SpaceWindow.ico (16-256 px) and SpaceWindow.png (256 px), and
+
+    python make_icon.py --hicolor <output-directory> [name]
+
+writes <output-directory>/<n>x<n>/apps/<name>.png (16-512 px): the layout of
+the freedesktop.org icon theme Linux desktops look in, as
+packaging/linux/icons holds it.
 """
 
 import struct
@@ -16,6 +22,8 @@ from pathlib import Path
 
 SUPERSAMPLE = 4
 SIZES = [16, 20, 24, 32, 40, 48, 64, 256]
+HICOLOR_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512]
+APP_ID = "io.github.techieandroid.SpaceWindow"
 
 # (left, top, right, bottom) in units of the icon size, back to front - the
 # same arrangement as the original 32x32 icon.
@@ -150,7 +158,18 @@ def dib_bytes(pixels):
     return header + xor + bytes(mask)
 
 
+def write_hicolor(out_dir, name):
+    for size in HICOLOR_SIZES:
+        folder = out_dir / f"{size}x{size}" / "apps"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{name}.png").write_bytes(png_bytes(render(size)))
+        print(f"wrote {folder / (name + '.png')}")
+
+
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "--hicolor":
+        write_hicolor(Path(sys.argv[2]), sys.argv[3] if len(sys.argv) > 3 else APP_ID)
+        return
     out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     out_dir.mkdir(parents=True, exist_ok=True)
     images = {size: render(size) for size in SIZES}

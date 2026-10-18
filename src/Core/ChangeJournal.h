@@ -62,6 +62,7 @@ namespace sm
         JournalChanges changes;
     };
 
+#ifdef _WIN32
     // Where the volume's change journal stands now; nothing if it keeps none.
     std::optional<JournalPosition> CurrentJournalPosition(ntfs::Volume const& volume);
 
@@ -73,6 +74,7 @@ namespace sm
     JournalRead ReadJournalChanges(JournalPosition const& from, std::stop_token const& stop,
                                    std::int64_t lookbackBytes = 0, std::uint64_t recentSince = 0,
                                    std::span<std::uint32_t const> recheck = {});
+#endif
 
     // The journal names a changed file only once until it is closed, so a file
     // kept open - a download, a virtual machine's disk, a database, a log -

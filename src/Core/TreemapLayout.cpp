@@ -167,7 +167,7 @@ namespace sm
 
         std::uint32_t const index = items.front();
         Folder* const child = folder->entries[index].child.get();
-        int const item = Add(folder, index, depth, x, y, w, h, child != nullptr ? DisplayFolder : 0);
+        int const item = Add(folder, index, depth, x, y, w, h, child != nullptr ? std::uint32_t{ DisplayFolder } : 0u);
         int const b = options_.border;
         int const innerWidth = w - 2 * b;
         int const innerHeight = h - options_.header - b;

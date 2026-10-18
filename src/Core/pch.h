@@ -1,8 +1,12 @@
 // Precompiled header for the SpaceWindow core library.
 #pragma once
 
+#ifdef _WIN32
 #include <windows.h>
 #include <winioctl.h>
+#else
+#include "Compat.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -39,4 +43,6 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
 #include <wil/resource.h>
+#endif

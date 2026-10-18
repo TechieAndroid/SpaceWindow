@@ -1,0 +1,177 @@
+# The Linux build: compiled and tested with GCC, with Clang, and under
+# AddressSanitizer on Ubuntu 24.04 (whose Qt, 6.4, is the oldest supported);
+# formatting, clang-tidy and the packaging files checked; AppImages built on
+# Ubuntu 22.04 (the oldest glibc they run on); and a .deb and an .rpm for
+# Ubuntu 24.04 and Fedora 44.  A version tag makes a draft release of them.
+name: Linux
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.preset }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-release, linux-clang, linux-asan]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the compilers and Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake make g++ clang python3 \
+            qt6-base-dev qt6-base-dev-tools qt6-qpa-plugins libgl-dev
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel "$(nproc)"
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  checks:
+    name: Formatting, clang-tidy, packaging files
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake make clang clang-tidy python3 \
+            qt6-base-dev qt6-base-dev-tools libgl-dev desktop-file-utils appstream
+      # build.ps1 -Analyze checks the same files with Visual Studio's clang-format (LLVM 19 or 20):
+      # the sources are formatted so that both versions agree.
+      - name: Formatting (.clang-format, with the clang-format the sources were formatted with)
+        run: |
+          git ls-files 'src/*.cpp' 'src/*.h' 'tests/*.cpp' 'tests/*.h' | grep -v 'ChromeThemeKeys\.h$' |
+            xargs pipx run --spec clang-format==23.1.3 clang-format --dry-run --Werror --style=file
+      - name: clang-tidy (.clang-tidy)
+        run: |
+          cmake --preset linux-tidy
+          cmake --build --preset linux-tidy --parallel "$(nproc)"
+      - name: The desktop entry and the AppStream metainfo
+        run: |
+          desktop-file-validate packaging/linux/*.desktop
+          appstreamcli validate --no-net packaging/linux/*.metainfo.xml
+      - name: The two builds in step (versions, source lists)
+        run: |
+          python3 -I tools/check_versions.py .
+          python3 -I tools/check_sources.py .
+
+  appimage:
+    name: AppImage (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04, qt-arch: linux_gcc_64 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm, qt-arch: linux_gcc_arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the compiler and what Qt and its X11 and Wayland plugins need
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-12 make libgl-dev libfuse2 libglib2.0-0 \
+            libegl1 libdbus-1-3 libfontconfig1 libfreetype6 libwayland-server0 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libwayland-cursor0 libwayland-egl1
+      - uses: jwlawson/actions-setup-cmake@v2  # Ubuntu 22.04's CMake is older than 3.25
+        with:
+          cmake-version: '3.30.x'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: ${{ matrix.qt-arch }}
+          modules: qtwaylandcompositor
+          cache: true
+      - name: Build the AppImage
+        env:
+          CXX: g++-12
+        run: bash packaging/appimage/build-appimage.sh out/appimage  # git keeps no executable bit here
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpaceWindow-AppImage-${{ matrix.arch }}
+          path: out/appimage/SpaceWindow-*.AppImage
+
+  deb:
+    name: Debian package (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the compiler, Qt and the packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake make g++ qt6-base-dev qt6-base-dev-tools \
+            libgl-dev dpkg-dev file
+      - name: Build the package
+        run: |
+          cmake -S . -B out/build/deb -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build out/build/deb --parallel "$(nproc)"
+          cd out/build/deb && cpack -G DEB
+      - name: Install it and run it
+        run: |
+          sudo apt-get install -y ./out/build/deb/spacewindow_*.deb
+          QT_QPA_PLATFORM=offscreen spacewindow --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpaceWindow-deb
+          path: out/build/deb/spacewindow_*.deb
+
+  rpm:
+    name: RPM package (Fedora 44)
+    runs-on: ubuntu-24.04
+    container: fedora:44
+    steps:
+      - name: Install the compiler, Qt and the packaging tools
+        run: dnf install -y cmake gcc-c++ make git qt6-qtbase-devel rpm-build
+      - uses: actions/checkout@v4
+      - name: Build the package
+        run: |
+          cmake -S . -B out/build/rpm -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build out/build/rpm --parallel "$(nproc)"
+          cd out/build/rpm && cpack -G RPM
+      - name: Install it and run it
+        run: |
+          dnf install -y ./out/build/rpm/spacewindow-*.rpm
+          QT_QPA_PLATFORM=offscreen spacewindow --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpaceWindow-rpm
+          path: out/build/rpm/spacewindow-*.rpm
+
+  release:
+    name: Draft the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, checks, appimage, deb, rpm]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # to make the release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: SpaceWindow-*
+          merge-multiple: true
+          path: release
+      - name: Make the tag's draft release, with the Linux files (the Windows ones are added by hand)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l release
+          # Run again (a job failed, say), the workflow replaces the files of the draft it made.
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" release/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --draft \
+              --title "SpaceWindow ${GITHUB_REF_NAME#v}" \
+              --notes "Add the Windows files (README.md, Publishing a release), then publish."
+          fi

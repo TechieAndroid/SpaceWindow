@@ -31,3 +31,6 @@ CLAUDE.local.md
 # File Explorer
 Thumbs.db
 desktop.ini
+
+# CMake builds (Linux)
+out/

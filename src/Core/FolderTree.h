@@ -42,6 +42,17 @@ namespace sm
 {
     struct Folder;
     class FolderWatch;
+    class InodeTable;
+
+    // How the system writes paths: what separates folders, and whether two
+    // names that differ only in case name the same file.
+#ifdef _WIN32
+    inline constexpr wchar_t kPathSeparator = L'\\';
+    inline constexpr bool kCaseInsensitivePaths = true;
+#else
+    inline constexpr wchar_t kPathSeparator = L'/';
+    inline constexpr bool kCaseInsensitivePaths = false;
+#endif
 
     // Junctions, directory and file symbolic links, and volume mount points
     // are "name surrogates": aliases for data that lives somewhere else.
@@ -219,6 +230,9 @@ namespace sm
         bool addFreeSpace = true;     // add the free/unscanned pseudo-entries when scanning a whole drive
         bool masterFileTable = true;  // read a whole NTFS drive's master file table, when allowed (Ntfs.h)
         bool watch = false;           // when listing folders: watch them for changes, from the start (FolderWatch.h)
+#ifndef _WIN32
+        std::size_t watchLimit = 0;  // the most folders watched (0: as many as the system lets the program)
+#endif
     };
 
     enum class ScanMethod : std::uint8_t
@@ -256,7 +270,7 @@ namespace sm
         FolderTree(std::unique_ptr<Folder> root, std::wstring rootPath, VolumeInfo volume, bool addSpecialEntries);
 
         Folder* Root() const noexcept { return root_.get(); }
-        std::wstring const& RootPath() const noexcept { return rootPath_; }  // ends with a backslash
+        std::wstring const& RootPath() const noexcept { return rootPath_; }  // ends with kPathSeparator
         VolumeInfo const& Volume() const noexcept { return volume_; }
         bool IsWholeVolume() const noexcept { return wholeVolume_; }
 
@@ -289,11 +303,21 @@ namespace sm
         // last closed: their sizes are read from them again on the next.
         std::vector<std::wstring> growingFiles;  // relative to the root
 
+#ifndef _WIN32
+        // The record numbers its files' inodes were given (Posix.h), kept so
+        // that rescans of part of the tree number them the same way.
+        std::shared_ptr<InodeTable> inodes;
+
+        // It has more folders than the system lets a program watch (FolderWatch.h):
+        // scans of it again need not try.
+        bool tooBigToWatch = false;
+#endif
+
         // Paths of the folders that could not be listed, sorted.
         std::vector<std::wstring> UnreadableFolders() const;
 
         // Full paths, built by walking up the tree (1.4.0 used recursion).
-        std::wstring PathOf(Folder const& folder) const;  // ends with a backslash
+        std::wstring PathOf(Folder const& folder) const;  // ends with kPathSeparator
         std::wstring PathOf(Folder const& folder, std::size_t index) const;
 
         // Removes an entry that was deleted from the disk and updates the totals

@@ -5,14 +5,24 @@
 // listing for tens of seconds before Windows gives up on it.  Threads that
 // enlist here have that I/O cancelled (CancelSynchronousIo) the moment the
 // scan is stopped, so Cancel takes effect at once.
+//
+// Other systems have no such call.  There a stop sends the threads a signal
+// whose handler does nothing (IoCancellationPosix.cpp): system calls that can
+// be interrupted - a read from a pipe, from a FUSE file system, or from an
+// NFS share mounted "intr" - then fail at once with EINTR.  Others still take
+// their time.
 #pragma once
 
 #include <mutex>
 #include <stop_token>
 #include <vector>
 
+#ifdef _WIN32
 #include <windows.h>
 #include <wil/resource.h>
+#else
+#include <pthread.h>
+#endif
 
 namespace sm
 {
@@ -42,15 +52,26 @@ namespace sm
 
         private:
             IoCancellation& owner_;
+#ifdef _WIN32
             DWORD threadId_;
+#else
+            pthread_t thread_;
+#endif
         };
 
     private:
+#ifdef _WIN32
         struct Thread
         {
             DWORD id = 0;
             wil::unique_handle handle;
         };
+#else
+        struct Thread
+        {
+            pthread_t id{};
+        };
+#endif
 
         struct Canceller
         {

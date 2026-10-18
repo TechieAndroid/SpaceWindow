@@ -39,11 +39,16 @@ $common = @(
     '-Wno-unknown-pragmas', '-Wno-unused-command-line-argument'
 )
 
+# The Linux build's own files (tools\check_sources.py lists them: *Posix.cpp and
+# the presenter's tests) include headers Windows does not have.
+$linuxOnly = @('PresenterTests.cpp')
 $jobs = @()
 foreach ($dir in 'src\Core', 'tests\CoreTests') {
-    Get-ChildItem (Join-Path $Root $dir) -Filter *.cpp | Where-Object Name -ne 'pch.cpp' | ForEach-Object {
-        $jobs += [pscustomobject]@{ File = $_.FullName; Flags = $common + @("/I$(Join-Path $Root $dir)") }
-    }
+    Get-ChildItem (Join-Path $Root $dir) -Filter *.cpp |
+        Where-Object { $_.Name -ne 'pch.cpp' -and $_.Name -notlike '*Posix.cpp' -and $linuxOnly -notcontains $_.Name } |
+        ForEach-Object {
+            $jobs += [pscustomobject]@{ File = $_.FullName; Flags = $common + @("/I$(Join-Path $Root $dir)") }
+        }
 }
 if ($IncludeApp) {
     $generated = Join-Path $Root 'obj\x64\Release\Generated Files\SpaceWindow'

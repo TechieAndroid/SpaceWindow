@@ -285,7 +285,7 @@ TEST_CASE(LayoutOfANestedTreeKeepsItsInvariants)
 
     for (int density = sm::Settings::kMinDensity; density <= sm::Settings::kMaxDensity; ++density)
     {
-        for (auto const [width, height] : { std::pair{ 1921, 1081 }, std::pair{ 3841, 2161 }, std::pair{ 50, 40 } })
+        for (auto const& [width, height] : { std::pair{ 1921, 1081 }, std::pair{ 3841, 2161 }, std::pair{ 50, 40 } })
         {
             sm::TreemapLayout layout;
             layout.Build(&root, 0, width, height, sm::LayoutOptions::ForDensity(density, 1.5));

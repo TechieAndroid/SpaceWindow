@@ -2,6 +2,11 @@
 #include "pch.h"
 #include "TestHarness.h"
 
+#include "../../src/Core/FolderTree.h"
+#ifndef _WIN32
+#include <fstream>
+#endif
+
 #include "../../src/Core/Theme.h"
 
 namespace
@@ -58,6 +63,7 @@ namespace
     class TempFolder
     {
     public:
+#ifdef _WIN32
         TempFolder()
         {
             wchar_t temp[MAX_PATH + 1]{};
@@ -116,6 +122,38 @@ namespace
         {
             CHECK(CreateDirectoryW((path_ + L"\\" + name).c_str(), nullptr));
         }
+
+#else
+        TempFolder()
+        {
+            static std::atomic<unsigned> serial = 0;
+            std::filesystem::path const path =
+                std::filesystem::temp_directory_path() /
+                ("SpaceWindowThemes-" + std::to_string(getpid()) + "-" + std::to_string(serial++));
+            CHECK(std::filesystem::create_directory(path));
+            path_ = sm::posix::FromNative(path.string());
+        }
+        TempFolder(TempFolder const&) = delete;
+        TempFolder& operator=(TempFolder const&) = delete;
+        ~TempFolder()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(sm::posix::ToNative(path_), error);
+        }
+
+        std::wstring const& Path() const noexcept { return path_; }
+
+        void Write(std::wstring const& name, std::string_view bytes) const
+        {
+            std::ofstream file(sm::posix::ToNative(path_ + L"/" + name), std::ios::binary | std::ios::trunc);
+            CHECK(static_cast<bool>(file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()))));
+        }
+
+        void MakeFolder(std::wstring const& name) const
+        {
+            CHECK(std::filesystem::create_directory(sm::posix::ToNative(path_ + L"/" + name)));
+        }
+#endif
 
     private:
         std::wstring path_;
@@ -322,7 +360,8 @@ TEST_CASE(ThemeFilesAreLoadedFromFolders)
     second.Write(L"MIDNIGHT.INI", "[window]\nbackground = #000000\ntext = #FFFFFF\naccent = #FF0000\n");
     second.Write(L"extra.ini", "[window]\nbackground = #000000\ntext = #FFFFFF\naccent = #FF0000\n");
 
-    std::vector<std::wstring> const folders{ first.Path(), first.Path() + L"\\missing", second.Path() };
+    std::vector<std::wstring> const folders{ first.Path(), first.Path() + sm::kPathSeparator + L"missing",
+                                             second.Path() };
     std::vector<std::wstring> errors;
     std::vector<sm::Theme> const themes = sm::LoadThemes(folders, errors);
 

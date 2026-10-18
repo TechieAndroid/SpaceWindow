@@ -97,14 +97,24 @@ namespace sm
         friend bool operator==(Settings const&, Settings const&) = default;
     };
 
+#ifdef _WIN32
     inline constexpr std::wstring_view kSettingsKey = L"Software\\SpaceWindow";
     inline constexpr std::wstring_view kLegacySettingsKey = L"Software\\65\\SpaceMonger\\1.3";  // SpaceMonger 1.x
+#else
+    // Elsewhere the settings are a text file of "name = value" lines, with the
+    // registry's value names; a relative path is below $XDG_CONFIG_HOME
+    // (~/.config).  SpaceMonger 1.x never ran there: there is nothing to import.
+    inline constexpr std::wstring_view kSettingsKey = L"SpaceWindow/settings.ini";
+    inline constexpr std::wstring_view kLegacySettingsKey;
+#endif
 
     // Loads the settings from HKEY_CURRENT_USER\<key>.  If that key does not
     // exist yet, the settings of SpaceMonger 1.x are imported from
     // HKEY_CURRENT_USER\<legacyKey>.  Missing values keep their defaults.
+    // (Elsewhere: from the files `key` and `legacyKey`.)
     Settings LoadSettings(std::wstring_view key = kSettingsKey, std::wstring_view legacyKey = kLegacySettingsKey);
 
-    // Saves the settings to HKEY_CURRENT_USER\<key>.  Returns false on failure.
+    // Saves the settings to HKEY_CURRENT_USER\<key> (elsewhere: the file `key`).
+    // Returns false on failure.
     bool SaveSettings(Settings const& settings, std::wstring_view key = kSettingsKey);
 }

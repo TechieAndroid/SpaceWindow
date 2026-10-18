@@ -32,7 +32,7 @@ Checks: >
   readability-simplify-boolean-expr,
   readability-make-member-function-const,
   readability-static-accessed-through-instance
-HeaderFilterRegex: '.*[\\/](src[\\/](App|Core)|tests[\\/]CoreTests)[\\/].*'
+HeaderFilterRegex: '.*[\\/](src[\\/](App|AppQt|Core|Presenter)|tests[\\/](CoreTests|AppQt))[\\/].*'
 FormatStyle: none
 CheckOptions:
   # C++/WinRT projections are reference-counted handles whose methods are all

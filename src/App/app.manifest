@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="1.0.0.0" name="SpaceWindow.app" />
+  <assemblyIdentity version="1.1.0.0" name="SpaceWindow.app" />
 
   <!-- Run with the caller's rights; elevating is the user's choice (it lets the
        scanner read folders the user cannot otherwise list). -->

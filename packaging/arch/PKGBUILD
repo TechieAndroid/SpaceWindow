@@ -1,0 +1,36 @@
+# The Arch Linux package, for the AUR: makepkg -si in this folder builds and
+# installs the version below from its release tag.  To publish a version, set
+# pkgver (and pkgrel=1), push the tag, run updpkgsums, then
+# makepkg --printsrcinfo > .SRCINFO, and commit PKGBUILD and .SRCINFO to the
+# AUR's repository (ssh://aur@aur.archlinux.org/spacewindow.git).
+# Maintainer: recompiler (https://github.com/TechieAndroid/SpaceWindow/issues)
+
+pkgname=spacewindow
+pkgver=1.1.0
+pkgrel=1
+pkgdesc='See where your disk space goes: a treemap and pie charts of a drive or folder'
+arch=('x86_64' 'aarch64')
+url='https://github.com/TechieAndroid/SpaceWindow'
+license=('MIT')
+depends=('glibc' 'hicolor-icon-theme' 'libgcc' 'libstdc++' 'qt6-base')
+makedepends=('cmake')
+optdepends=('qt6-wayland: a native Wayland window, sharp at fractional scales')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # updpkgsums, once the tag is pushed
+
+build() {
+  # makepkg's flags (build type None); a newer compiler's new warnings are not errors here.
+  cmake -S "SpaceWindow-$pkgver" -B build -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr \
+    -DSPACEWINDOW_WERROR=OFF
+  cmake --build build
+}
+
+check() {
+  ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" \
+    "SpaceWindow-$pkgver/LICENSE.txt" "SpaceWindow-$pkgver/THIRD-PARTY-NOTICES.md"
+}

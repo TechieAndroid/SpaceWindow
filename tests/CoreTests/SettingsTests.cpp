@@ -2,10 +2,15 @@
 #include "pch.h"
 #include "TestHarness.h"
 
+#ifndef _WIN32
+#include <fstream>
+#endif
+
 #include "../../src/Core/Settings.h"
 
 namespace
 {
+#ifdef _WIN32
     // A scratch registry key under HKCU\Software\SpaceWindowTests, deleted afterwards (not under
     // the app's own key: an empty one left behind would stop the 1.x import).
     class ScratchKey
@@ -40,6 +45,62 @@ namespace
     {
         CHECK(RegSetKeyValueW(HKEY_CURRENT_USER, key.c_str(), name, REG_DWORD, &value, sizeof(value)) == ERROR_SUCCESS);
     }
+
+    void WriteString(std::wstring const& key, char const* name, char const* value)
+    {
+        // 1.x was an ANSI program; RegSetValueExA stores REG_SZ as UTF-16 anyway.
+        CHECK(RegSetKeyValueA(HKEY_CURRENT_USER, test::ToUtf8(key).c_str(), name, REG_SZ, value,
+                              static_cast<DWORD>(std::strlen(value) + 1)) == ERROR_SUCCESS);
+    }
+#else
+    using DWORD = std::uint32_t;
+    constexpr int SW_SHOWMAXIMIZED = 3;
+
+    // Scratch settings files in a folder of their own in $TMPDIR, deleted afterwards.
+    class ScratchKey
+    {
+    public:
+        ScratchKey()
+        {
+            static std::atomic<unsigned> serial = 0;
+            folder_ = std::filesystem::temp_directory_path() /
+                      ("SpaceWindowSettings-" + std::to_string(getpid()) + "-" + std::to_string(serial++));
+            CHECK(std::filesystem::create_directory(folder_));
+        }
+        ScratchKey(ScratchKey const&) = delete;
+        ScratchKey& operator=(ScratchKey const&) = delete;
+        ~ScratchKey()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(folder_, error);
+        }
+
+        std::wstring Path() const { return Sub(L"settings.ini"); }
+        std::wstring Sub(std::wstring_view name) const
+        {
+            return sm::posix::FromNative((folder_ / sm::posix::ToNative(name)).string());
+        }
+
+    private:
+        std::filesystem::path folder_;
+    };
+
+    void WriteLine(std::wstring const& key, std::string const& line)
+    {
+        std::ofstream file(sm::posix::ToNative(key), std::ios::binary | std::ios::app);
+        CHECK(static_cast<bool>(file << line << '\n'));
+    }
+
+    void WriteDword(std::wstring const& key, wchar_t const* name, DWORD value)
+    {
+        WriteLine(key, sm::posix::ToNative(name) + " = " + std::to_string(value));
+    }
+
+    void WriteString(std::wstring const& key, char const* name, char const* value)
+    {
+        WriteLine(key, std::string(name) + " = " + value);
+    }
+#endif
 }
 
 TEST_CASE(ValidateClampsOutOfRangeValues)
@@ -123,6 +184,7 @@ TEST_CASE(SettingsRoundTripThroughTheRegistry)
     CHECK(loaded == saved);
 }
 
+#ifdef _WIN32  // (SpaceWindow 1.0 ran on Windows only)
 TEST_CASE(NumericThemeOfVersion1IsConverted)
 {
     // SpaceWindow 1.0 stored 0, 1 or 2 for "Use system setting", "Light" and "Dark".
@@ -135,6 +197,7 @@ TEST_CASE(NumericThemeOfVersion1IsConverted)
     WriteDword(key, L"theme", 0);
     CHECK_EQ(sm::LoadSettings(key, scratch.Sub(L"none")).theme, std::wstring(L"system"));
 }
+#endif
 
 TEST_CASE(MissingKeyGivesDefaults)
 {
@@ -156,8 +219,7 @@ TEST_CASE(LegacySettingsAreImported)
     WriteDword(legacy, L"window_rect.right", 900);
     WriteDword(legacy, L"window_rect.bottom", 650);
     WriteDword(legacy, L"window_showcmd", SW_SHOWMAXIMIZED);
-    // 1.x was an ANSI program; RegSetValueExA stores REG_SZ as UTF-16 anyway.
-    CHECK(RegSetKeyValueA(HKEY_CURRENT_USER, test::ToUtf8(legacy).c_str(), "lang", REG_SZ, "fr", 3) == ERROR_SUCCESS);
+    WriteString(legacy, "lang", "fr");
 
     sm::Settings const s = sm::LoadSettings(scratch.Sub(L"new"), legacy);
     CHECK_EQ(s.density, -1);

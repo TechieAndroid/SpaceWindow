@@ -1,0 +1,48 @@
+# SpaceWindow as a Flatpak (the Linux counterpart of the winget package):
+#
+#   flatpak-builder --user --install --force-clean out/flatpak packaging/flatpak/io.github.techieandroid.SpaceWindow.yml
+#   flatpak run io.github.techieandroid.SpaceWindow
+#
+# For Flathub, this file goes to its own repository there, with the source
+# below a git tag and commit instead of this checkout.
+#
+# A sandboxed disk scanner sees what the sandbox lets it see: with
+# --filesystem=host that is the user's files and every mounted drive, but /
+# is the runtime's, not the system's (the system's /usr is under /run/host),
+# and the list of drives comes from the sandbox's mounts.  The trash, opening
+# files and the file manager go through the desktop's portals.  For scanning
+# the system itself, use the AppImage or a distribution package.
+id: io.github.techieandroid.SpaceWindow
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+command: spacewindow
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=host
+  - --filesystem=host-os:ro
+  - --talk-name=org.freedesktop.FileManager1
+  - --system-talk-name=org.freedesktop.UPower.PowerProfiles
+  - --system-talk-name=net.hadess.PowerProfiles
+modules:
+  - name: spacewindow
+    buildsystem: cmake-ninja
+    config-opts:
+      # flatpak-builder's own default: the debug information goes to the .Debug extension.
+      - -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - -DBUILD_TESTING=OFF
+      # A newer SDK's compiler warns of new things (GCC 15.2 of a false use of an
+      # uninitialized value at -O3 -g): not a reason to fail the build here.
+      - -DSPACEWINDOW_WERROR=OFF
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - out
+          - bin
+          - obj
+          - packages
+          - artifacts

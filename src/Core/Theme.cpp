@@ -2,7 +2,14 @@
 #include "pch.h"
 #include "Theme.h"
 
+#include "FolderTree.h"
 #include "Text.h"
+#ifndef _WIN32
+#include "Posix.h"
+
+#include <filesystem>
+#include <fstream>
+#endif
 
 namespace sm
 {
@@ -224,6 +231,7 @@ grouped = #8F8D85           ; halfway between Background and Foreground
         // A theme file's text: UTF-8, with or without a byte-order mark, or UTF-16 with one.
         std::optional<std::wstring> ReadThemeFile(std::wstring const& path, std::wstring& error)
         {
+#ifdef _WIN32
             wil::unique_hfile const file(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
             LARGE_INTEGER size{};
@@ -246,10 +254,31 @@ grouped = #8F8D85           ; halfway between Background and Foreground
                 error = L"cannot be read";
                 return std::nullopt;
             }
+#else
+            std::ifstream file(posix::ToNative(path), std::ios::binary);
+            if (!file || !file.seekg(0, std::ios::end))
+            {
+                error = L"cannot be read";
+                return std::nullopt;
+            }
+            std::streamoff const size = file.tellg();
+            if (size < 0 || std::cmp_greater(size, kMaxFileBytes))
+            {
+                error = size < 0 ? L"cannot be read" : L"is too big for a theme file (the limit is 64 KB)";
+                return std::nullopt;
+            }
+            std::string bytes(static_cast<std::size_t>(size), '\0');
+            if (!file.seekg(0) || !file.read(bytes.data(), size))
+            {
+                error = L"cannot be read";
+                return std::nullopt;
+            }
+#endif
 
             auto const byte = [&bytes](std::size_t i) { return static_cast<unsigned char>(bytes[i]); };
             if (bytes.size() >= 2 && byte(0) == 0xFF && byte(1) == 0xFE)
             {
+#ifdef _WIN32
                 std::wstring text;
                 text.reserve(bytes.size() / 2);
                 for (std::size_t i = 2; i + 1 < bytes.size(); i += 2)
@@ -257,6 +286,15 @@ grouped = #8F8D85           ; halfway between Background and Foreground
                     text.push_back(static_cast<wchar_t>(byte(i) | (byte(i + 1) << 8)));
                 }
                 return text;
+#else
+                std::u16string units;
+                units.reserve(bytes.size() / 2);
+                for (std::size_t i = 2; i + 1 < bytes.size(); i += 2)
+                {
+                    units.push_back(static_cast<char16_t>(byte(i) | (byte(i + 1) << 8)));
+                }
+                return posix::FromUtf16(units);
+#endif
             }
             std::string_view utf8(bytes);
             if (utf8.starts_with("\xEF\xBB\xBF"))
@@ -267,6 +305,14 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             {
                 return std::wstring();
             }
+#ifndef _WIN32
+            std::optional<std::wstring> text = posix::DecodeUtf8(utf8);
+            if (!text)
+            {
+                error = L"is not UTF-8 or UTF-16 text";
+            }
+            return text;
+#else
             int const length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
                                                    static_cast<int>(utf8.size()), nullptr, 0);
             if (length <= 0)
@@ -278,12 +324,14 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(), static_cast<int>(utf8.size()), text.data(),
                                 length);
             return text;
+#endif
         }
 
         // The theme files in a folder, in name order.
         std::vector<std::wstring> ThemeFiles(std::wstring const& folder)
         {
             std::vector<std::wstring> names;
+#ifdef _WIN32
             WIN32_FIND_DATAW data{};
             wil::unique_hfind const find(FindFirstFileExW((folder + L"\\*.ini").c_str(), FindExInfoBasic, &data,
                                                           FindExSearchNameMatch, nullptr, 0));
@@ -301,6 +349,21 @@ grouped = #8F8D85           ; halfway between Background and Foreground
                     names.emplace_back(name);
                 }
             } while (FindNextFileW(find.get(), &data));
+#else
+            std::error_code error;
+            for (std::filesystem::directory_iterator it(posix::ToNative(folder), error), end; !error && it != end;
+                 it.increment(error))
+            {
+                // Theme files may be written "*.INI" too, as on Windows.
+                std::wstring const name = posix::FromNative(it->path().filename().string());
+                std::error_code type;
+                if (!it->is_directory(type) && name.size() > 4 &&
+                    EqualsIgnoringCase(std::wstring_view(name).substr(name.size() - 4), L".ini"))
+                {
+                    names.push_back(name);
+                }
+            }
+#endif
             std::ranges::sort(names, LessIgnoringCase);
             return names;
         }
@@ -552,7 +615,8 @@ grouped = #8F8D85           ; halfway between Background and Foreground
             for (std::wstring const& name : ThemeFiles(folder))
             {
                 std::wstring_view const id = std::wstring_view(name).substr(0, name.size() - 4);  // without ".ini"
-                std::wstring const path = Join(folder, L"\\", name);
+                std::wstring const separator(1, kPathSeparator);
+                std::wstring const path = Join(folder, separator, name);
                 if (std::ranges::any_of(themes, [id](Theme const& theme) { return EqualsIgnoringCase(theme.id, id); }))
                 {
                     errors.push_back(Join(path, L": not used, there is already a theme called \"", id, L"\""));

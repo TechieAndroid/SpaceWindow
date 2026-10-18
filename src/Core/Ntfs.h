@@ -24,8 +24,10 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef _WIN32
 #include <windows.h>
 #include <wil/resource.h>
+#endif
 
 #include "FolderTree.h"
 
@@ -126,7 +128,9 @@ namespace sm::ntfs
     // cluster `lowestVcn` of the attribute.  False if the list is malformed.
     bool DecodeRuns(std::span<std::byte const> mappingPairs, std::uint64_t lowestVcn, std::vector<Extent>& out);
 
+#ifdef _WIN32
     // An NTFS volume opened for direct reading.  Nothing is ever written to it.
+    // (Windows only: other systems read the file records only in the tests.)
     class Volume
     {
     public:
@@ -190,6 +194,7 @@ namespace sm::ntfs
         std::uint64_t mftStartLcn_ = 0;
         std::vector<Extent> mft_;  // where the MFT is on the volume
     };
+#endif
 
     // Builds the folder tree from file records given in any order.
     class TreeBuilder
@@ -247,9 +252,11 @@ namespace sm::ntfs
         bool hardLinks_ = false;
     };
 
+#ifdef _WIN32
     // Scans a whole NTFS volume through its MFT.  `root` is its mount point.
     // Nothing if the volume cannot be read directly (not NTFS, not running
     // as administrator, a read error); the caller then lists folders instead.
     std::optional<ScanResult> ScanVolume(std::wstring const& root, VolumeInfo volume, ScanProgress& progress,
                                          std::stop_token const& stop, bool addSpecialEntries);
+#endif
 }

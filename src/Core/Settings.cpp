@@ -6,6 +6,16 @@
 #include "Settings.h"
 
 #include "Palette.h"
+#ifndef _WIN32
+#include "Posix.h"
+
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#endif
 
 namespace sm
 {
@@ -38,6 +48,7 @@ namespace sm
         constexpr wchar_t kWindowHeight[] = L"window_height";
         constexpr wchar_t kWindowMaximized[] = L"window_maximized";
 
+#ifdef _WIN32
         class Key
         {
         public:
@@ -94,6 +105,127 @@ namespace sm
         private:
             wil::unique_hkey handle_;
         };
+#else
+        // ShowWindow's and CreateWindow's values, as SpaceMonger 1.x stored them.
+        constexpr int SW_SHOWNORMAL = 1;
+        constexpr int SW_SHOWMAXIMIZED = 3;
+        constexpr int CW_USEDEFAULT = INT_MIN;
+
+        // Where a settings file is: a relative path is below $XDG_CONFIG_HOME.
+        std::filesystem::path SettingsFile(std::wstring_view key)
+        {
+            if (key.empty())
+            {
+                return {};
+            }
+            std::filesystem::path path(posix::ToNative(key));
+            if (path.is_absolute())
+            {
+                return path;
+            }
+            if (char const* const config = std::getenv("XDG_CONFIG_HOME"); config != nullptr && config[0] == '/')
+            {
+                return std::filesystem::path(config) / path;
+            }
+            if (char const* const home = std::getenv("HOME"); home != nullptr && home[0] != '\0')
+            {
+                return std::filesystem::path(home) / ".config" / path;
+            }
+            return {};
+        }
+
+        std::wstring_view TrimSpaces(std::wstring_view text) noexcept
+        {
+            std::size_t const first = text.find_first_not_of(L" \t\r");
+            if (first == std::wstring_view::npos)
+            {
+                return {};
+            }
+            return text.substr(first, text.find_last_not_of(L" \t\r") - first + 1);
+        }
+
+        // The settings file, read: "name = value" lines; '#' and ';' start comment lines.
+        class Key
+        {
+        public:
+            static Key Open(std::wstring_view path)
+            {
+                Key key;
+                std::filesystem::path const file = SettingsFile(path);
+                std::ifstream stream;
+                if (!file.empty())
+                {
+                    stream.open(file, std::ios::binary);
+                }
+                if (!stream)
+                {
+                    return key;
+                }
+                key.open_ = true;
+                std::string line;
+                while (std::getline(stream, line))
+                {
+                    std::wstring const text = posix::FromNative(line);
+                    std::wstring_view const trimmed = TrimSpaces(text);
+                    std::size_t const equals = trimmed.find(L'=');
+                    if (trimmed.empty() || trimmed.front() == L'#' || trimmed.front() == L';' ||
+                        equals == std::wstring_view::npos)
+                    {
+                        continue;
+                    }
+                    key.values_[std::wstring(TrimSpaces(trimmed.substr(0, equals)))] =
+                        std::wstring(TrimSpaces(trimmed.substr(equals + 1)));
+                }
+                return key;
+            }
+
+            explicit operator bool() const noexcept { return open_; }
+
+            // Numbers as the registry's DWORDs held them: signed, or up to 2^32 - 1.
+            void Read(wchar_t const* name, int& value) const noexcept
+            {
+                auto const found = values_.find(name);
+                if (found == values_.end() || found->second.empty())
+                {
+                    return;
+                }
+                wchar_t* end = nullptr;
+                errno = 0;
+                long long const number = std::wcstoll(found->second.c_str(), &end, 10);
+                if (errno == 0 && end != nullptr && *end == L'\0' && std::cmp_greater_equal(number, INT_MIN) &&
+                    std::cmp_less_equal(number, UINT32_MAX))
+                {
+                    value = static_cast<int>(static_cast<std::uint32_t>(number));
+                }
+            }
+
+            void Read(wchar_t const* name, bool& value) const noexcept
+            {
+                int number = value ? 1 : 0;
+                Read(name, number);
+                value = number != 0;
+            }
+
+            void Read(wchar_t const* name, std::uint32_t& value) const noexcept
+            {
+                int number = static_cast<int>(value);
+                Read(name, number);
+                value = static_cast<std::uint32_t>(number);
+            }
+
+            void Read(wchar_t const* name, std::wstring& value) const
+            {
+                if (auto const found = values_.find(name); found != values_.end())
+                {
+                    value = found->second;
+                }
+            }
+
+        private:
+            bool open_ = false;
+            std::map<std::wstring, std::wstring, std::less<>> values_;
+        };
+#endif
 
         void ReadCommon(Key const& key, Settings& s)
         {
@@ -133,6 +265,7 @@ namespace sm
             }
         }
 
+#ifdef _WIN32
         bool Write(HKEY key, wchar_t const* name, DWORD value) noexcept
         {
             return RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<BYTE const*>(&value), sizeof(value)) ==
@@ -154,6 +287,73 @@ namespace sm
             auto const bytes = static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t));
             return RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<BYTE const*>(value.c_str()), bytes) ==
                    ERROR_SUCCESS;
+        }
+
+        // Where SaveSettings writes: a registry key.
+        struct Sink
+        {
+            HKEY key;
+            bool Write(wchar_t const* name, int value) const noexcept { return sm::Write(key, name, value); }
+            bool Write(wchar_t const* name, bool value) const noexcept { return sm::Write(key, name, value); }
+            bool Write(wchar_t const* name, std::uint32_t value) const noexcept
+            {
+                return sm::Write(key, name, static_cast<DWORD>(value));
+            }
+            bool Write(wchar_t const* name, std::wstring const& value) const noexcept
+            {
+                return sm::Write(key, name, value);
+            }
+        };
+#else
+        // Where SaveSettings writes: the lines of the settings file.
+        struct Sink
+        {
+            std::string text = "# SpaceWindow settings\n";
+
+            bool Line(wchar_t const* name, std::wstring_view value)
+            {
+                std::wstring line(name);
+                line.append(L" = ").append(value);
+                std::ranges::replace(line, L'\n', L' ');
+                std::ranges::replace(line, L'\r', L' ');
+                text.append(posix::ToNative(line)).push_back('\n');
+                return true;
+            }
+            bool Write(wchar_t const* name, int value) { return Line(name, std::to_wstring(value)); }
+            bool Write(wchar_t const* name, bool value) { return Line(name, value ? L"1" : L"0"); }
+            bool Write(wchar_t const* name, std::uint32_t value) { return Line(name, std::to_wstring(value)); }
+            bool Write(wchar_t const* name, std::wstring const& value) { return Line(name, value); }
+        };
+#endif
+
+        template <typename Out>
+        bool WriteAll(Out& out, Settings const& s)
+        {
+            bool ok = true;
+            ok &= out.Write(kDensity, s.density);
+            ok &= out.Write(kFileColor, s.fileColor);
+            ok &= out.Write(kFolderColor, s.folderColor);
+            ok &= out.Write(kAutoRescan, s.autoRescan);
+            ok &= out.Write(kAnimatedZoom, s.animatedZoom);
+            ok &= out.Write(kDisableDelete, s.disableDelete);
+            ok &= out.Write(kSavePos, s.savePosition);
+            ok &= out.Write(kBias, s.bias);
+            ok &= out.Write(kShowNameTips, s.showNameTips);
+            ok &= out.Write(kRolloverBox, s.rolloverBox);
+            ok &= out.Write(kShowInfoTips, s.showInfoTips);
+            ok &= out.Write(kNameTipDelay, s.nameTipDelay);
+            ok &= out.Write(kInfoTipFlags, s.infoTipFlags);
+            ok &= out.Write(kInfoTipDelay, s.infoTipDelay);
+            ok &= out.Write(kLang, s.language);
+            ok &= out.Write(kTheme, s.theme);
+            ok &= out.Write(kViewMode, static_cast<int>(s.viewMode));
+            ok &= out.Write(kBackdrop, static_cast<int>(s.backdrop));
+            ok &= out.Write(kWindowX, s.window.x);
+            ok &= out.Write(kWindowY, s.window.y);
+            ok &= out.Write(kWindowWidth, s.window.width);
+            ok &= out.Write(kWindowHeight, s.window.height);
+            ok &= out.Write(kWindowMaximized, s.window.maximized);
+            return ok;
         }
     }
 
@@ -249,6 +449,7 @@ namespace sm
         return settings;
     }
 
+#ifdef _WIN32
     bool SaveSettings(Settings const& s, std::wstring_view key)
     {
         wil::unique_hkey handle;
@@ -259,31 +460,34 @@ namespace sm
             return false;
         }
 
-        HKEY const k = handle.get();
-        bool ok = true;
-        ok &= Write(k, kDensity, s.density);
-        ok &= Write(k, kFileColor, s.fileColor);
-        ok &= Write(k, kFolderColor, s.folderColor);
-        ok &= Write(k, kAutoRescan, s.autoRescan);
-        ok &= Write(k, kAnimatedZoom, s.animatedZoom);
-        ok &= Write(k, kDisableDelete, s.disableDelete);
-        ok &= Write(k, kSavePos, s.savePosition);
-        ok &= Write(k, kBias, s.bias);
-        ok &= Write(k, kShowNameTips, s.showNameTips);
-        ok &= Write(k, kRolloverBox, s.rolloverBox);
-        ok &= Write(k, kShowInfoTips, s.showInfoTips);
-        ok &= Write(k, kNameTipDelay, s.nameTipDelay);
-        ok &= Write(k, kInfoTipFlags, static_cast<DWORD>(s.infoTipFlags));
-        ok &= Write(k, kInfoTipDelay, s.infoTipDelay);
-        ok &= Write(k, kLang, s.language);
-        ok &= Write(k, kTheme, s.theme);
-        ok &= Write(k, kViewMode, static_cast<int>(s.viewMode));
-        ok &= Write(k, kBackdrop, static_cast<int>(s.backdrop));
-        ok &= Write(k, kWindowX, s.window.x);
-        ok &= Write(k, kWindowY, s.window.y);
-        ok &= Write(k, kWindowWidth, s.window.width);
-        ok &= Write(k, kWindowHeight, s.window.height);
-        ok &= Write(k, kWindowMaximized, s.window.maximized);
-        return ok;
+        Sink const sink{ handle.get() };
+        return WriteAll(sink, s);
     }
+#else
+    bool SaveSettings(Settings const& s, std::wstring_view key)
+    {
+        std::filesystem::path const file = SettingsFile(key);
+        if (file.empty())
+        {
+            return false;
+        }
+        Sink sink;
+        WriteAll(sink, s);
+        // Written whole beside it, then put in its place: a crash never leaves half a file.
+        std::error_code error;
+        std::filesystem::create_directories(file.parent_path(), error);
+        std::filesystem::path temporary = file;
+        temporary += ".new";
+        {
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            stream << sink.text;
+            if (!stream.flush())
+            {
+                return false;
+            }
+        }
+        std::filesystem::rename(temporary, file, error);
+        return !error;
+    }
+#endif
 }

@@ -2,6 +2,10 @@
 #include "pch.h"
 #include "TestHarness.h"
 
+#ifndef _WIN32
+#include <ctime>
+#endif
+
 #include "../../src/Core/Commands.h"
 #include "../../src/Core/Format.h"
 #include "../../src/Core/Lang.h"
@@ -77,6 +81,7 @@ TEST_CASE(FormatPercentTruncatesAndAvoidsOverflow)
 
 TEST_CASE(FormatFileTimeUsesLocalTime)
 {
+#ifdef _WIN32
     SYSTEMTIME universal{};
     universal.wYear = 1999;
     universal.wMonth = 3;
@@ -96,6 +101,26 @@ TEST_CASE(FormatFileTimeUsesLocalTime)
                      static_cast<unsigned>(local.wYear), static_cast<unsigned>(local.wHour),
                      static_cast<unsigned>(local.wMinute), static_cast<unsigned>(local.wSecond)) > 0);
     CHECK_EQ(sm::FormatFileTime(value, Us()), std::wstring(expected));
+#else
+    std::tm universal{};
+    universal.tm_year = 1999 - 1900;
+    universal.tm_mon = 3 - 1;
+    universal.tm_mday = 5;
+    universal.tm_hour = 14;
+    universal.tm_min = 3;
+    universal.tm_sec = 22;
+    std::time_t const seconds = timegm(&universal);
+    std::uint64_t const value = sm::posix::ToFileTime(seconds, 0);
+    CHECK_EQ(value, std::uint64_t{ 125'651'162'020'000'000 });  // as Windows' SystemTimeToFileTime has it
+
+    std::tm local{};
+    CHECK(localtime_r(&seconds, &local) != nullptr);
+    std::wstring const month(Us().monthNames[static_cast<std::size_t>(local.tm_mon)]);
+    wchar_t expected[64];
+    CHECK(std::swprintf(expected, std::size(expected), L"%02d %ls %04d   %d:%02d:%02d", local.tm_mday, month.c_str(),
+                        local.tm_year + 1900, local.tm_hour, local.tm_min, local.tm_sec) > 0);
+    CHECK_EQ(sm::FormatFileTime(value, Us()), std::wstring(expected));
+#endif
 }
 
 TEST_CASE(FormatAttributesListsNames)

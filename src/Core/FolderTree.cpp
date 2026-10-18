@@ -9,7 +9,12 @@
 #include "FolderWatch.h"
 #include "IoCancellation.h"
 #include "Ntfs.h"
+#include "ScopeExit.h"
 #include "Text.h"
+#ifndef _WIN32
+#include "FolderTreePosix.h"
+#include "Posix.h"
+#endif
 
 namespace sm
 {
@@ -20,8 +25,9 @@ namespace sm
         constexpr std::size_t kListingBufferBytes = std::size_t{ 256 } * 1024;
 
         // How often a worker publishes the folder it is scanning.
-        constexpr ULONGLONG kPathReportIntervalMs = 100;
+        constexpr auto kPathReportInterval = std::chrono::milliseconds(100);
 
+#ifdef _WIN32
         constexpr std::wstring_view kExtendedPrefix = L"\\\\?\\";
         constexpr std::wstring_view kExtendedUncPrefix = L"\\\\?\\UNC\\";
 
@@ -34,6 +40,13 @@ namespace sm
         {
             return (std::uint64_t{ value.dwHighDateTime } << 32) | value.dwLowDateTime;
         }
+#endif
+
+        // Paths name the same file: as Windows compares them, or byte for byte.
+        bool SamePath(std::wstring_view a, std::wstring_view b) noexcept
+        {
+            return kCaseInsensitivePaths ? EqualsIgnoringCase(a, b) : a == b;
+        }
 
         void Deduct(std::uint64_t& total, std::uint64_t amount) noexcept
         {
@@ -45,6 +58,7 @@ namespace sm
             return name == L"." || name == L"..";
         }
 
+#ifdef _WIN32
         // IsAlias (FolderTree.h) tests what the SDK's IsReparseTagNameSurrogate does, without its C-style cast.
         static_assert(IsReparseTagNameSurrogate(IO_REPARSE_TAG_MOUNT_POINT) &&
                       IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_MOUNT_POINT) &&
@@ -52,6 +66,13 @@ namespace sm
                       !IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_CLOUD_6) &&
                       !IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_WOF) &&
                       !IsAlias(0, IO_REPARSE_TAG_MOUNT_POINT));
+#else
+        // Symbolic links and mount points are skipped as aliases (Posix scanner below).
+        static_assert(IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_MOUNT_POINT) &&
+                      IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_SYMLINK) &&
+                      !IsAlias(FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_CLOUD_6) &&
+                      !IsAlias(0, IO_REPARSE_TAG_MOUNT_POINT));
+#endif
 
         // Windows' own file compression (compact.exe, CompactOS) moves a file's
         // data into a stream of its own and hides that from folder listings:
@@ -71,6 +92,7 @@ namespace sm
                       !HidesItsSize(FILE_ATTRIBUTE_SPARSE_FILE, 0, 50000) &&
                       !HidesItsSize(FILE_ATTRIBUTE_NORMAL, 0, 0));
 
+#ifdef _WIN32
         // The space a file's data takes, as the file itself reports it.
         std::optional<std::uint64_t> CompressedSize(std::wstring const& path)
         {
@@ -183,6 +205,13 @@ namespace sm
             expanded.resize(written);
             return WithoutExtendedPrefix(expanded);
         }
+#else
+        // A path as the progress shows it: paths have no other form here.
+        std::wstring WithoutExtendedPrefix(std::wstring_view path)
+        {
+            return std::wstring(path);
+        }
+#endif
 
         // What a worker lists a folder into before the folder gets it: kept
         // from folder to folder, so that a folder's entries and names are
@@ -344,6 +373,9 @@ namespace sm
                 Listing listing;          // the folder's entries, until it gets them
                 std::vector<Task> found;  // its sub-folders, to be scanned
                 Counts counts;
+#ifndef _WIN32
+                std::wstring name;  // the entry being added
+#endif
             };
 
             void Work() noexcept
@@ -352,15 +384,15 @@ namespace sm
                 {
                     IoCancellation::Enlistment const enlisted(io_);
                     Scratch scratch;
-                    ULONGLONG nextReport = 0;
+                    std::chrono::steady_clock::time_point nextReport{};
                     Task task;
                     while (Pop(task))
                     {
-                        ULONGLONG const now = GetTickCount64();
+                        auto const now = std::chrono::steady_clock::now();
                         if (now >= nextReport)
                         {
                             progress_.SetCurrentPath(WithoutExtendedPrefix(task.path));
-                            nextReport = now + kPathReportIntervalMs;
+                            nextReport = now + kPathReportInterval;
                         }
                         Scan(task, scratch);
                         Retire(scratch.found);
@@ -432,10 +464,14 @@ namespace sm
             void Scan(Task const& task, Scratch& scratch)
             {
                 scratch.counts = {};
+#ifdef _WIN32
                 if (!ListWithHandle(task, scratch))
                 {
                     ListWithFindFile(task, scratch);
                 }
+#else
+                ListDirectory(task, scratch);
+#endif
                 // Before the folder counts as listed: a snapshot then reads its entries.
                 scratch.listing.MoveInto(*task.folder);
                 task.folder->listed.store(true, std::memory_order_release);
@@ -460,6 +496,7 @@ namespace sm
                 }
             }
 
+#ifdef _WIN32
             // Lists a folder in large batches.  Returns false if the file system
             // does not support FileFullDirectoryInfo, so the caller falls back.
             bool ListWithHandle(Task const& task, Scratch& scratch)
@@ -561,6 +598,47 @@ namespace sm
                         RoundUpToCluster(allocated, clusterSize_), logical, ToUInt64(data.ftLastWriteTime), 0);
                 } while (!stop_.stop_requested() && FindNextFileW(find.get(), &data));
             }
+#else
+        public:
+            // How folders are listed (FolderTreePosix.h): with record numbers for
+            // the files, handed to a watch first, from a network drive.
+            void Use(posix::ListingOptions const& options) noexcept { listing_ = options; }
+
+        private:
+            // Takes what posix::ListFolder lists into the task's folder.
+            class Sink final : public posix::ListingSink
+            {
+            public:
+                Sink(ParallelScan const& scan, Task const& task, Scratch& scratch) noexcept
+                    : scan_(scan), task_(task), scratch_(scratch)
+                {
+                }
+
+                void Add(posix::Listed const& entry) override
+                {
+                    scan_.Add(task_, scratch_, entry.name, entry.attributes, entry.reparseTag, entry.allocated,
+                              entry.logical, entry.lastWriteTime, entry.record);
+                }
+
+            private:
+                ParallelScan const& scan_;
+                Task const& task_;
+                Scratch& scratch_;
+            };
+
+            void ListDirectory(Task const& task, Scratch& scratch)
+            {
+                if (stop_.stop_requested())
+                {
+                    return;  // stopping: not worth opening another folder, which may block
+                }
+                Sink sink(*this, task, scratch);
+                if (!posix::ListFolder(task.path, listing_, stop_, scratch.buffer, scratch.name, sink))
+                {
+                    MarkUnreadable(*task.folder);
+                }
+            }
+#endif
 
             void Add(Task const& task, Scratch& scratch, std::wstring_view name, std::uint32_t attributes,
                      std::uint32_t reparseTag, std::uint64_t allocated, std::uint64_t logical,
@@ -606,7 +684,7 @@ namespace sm
 
                 std::wstring path;
                 path.reserve(task.path.size() + name.size() + 1);
-                path.append(task.path).append(name).push_back(L'\\');
+                path.append(task.path).append(name).push_back(kPathSeparator);
                 scratch.found.push_back({ childFolder, std::move(path) });
 
                 // The child cannot finish before Retire() publishes it, so the
@@ -665,9 +743,12 @@ namespace sm
             ScanProgress& progress_;
             std::stop_token stop_;
             IoCancellation& io_;
-            std::uint64_t const clusterSize_;
+            [[maybe_unused]] std::uint64_t const clusterSize_;  // (unused where listings report allocations)
             std::atomic<bool> fileIds_;
             bool const shallow_;
+#ifndef _WIN32
+            posix::ListingOptions listing_;
+#endif
             std::shared_mutex finalizing_;  // shared while folders are finalized, exclusive for a snapshot
             std::atomic<std::uint64_t> unreadable_{ 0 };
 
@@ -679,6 +760,7 @@ namespace sm
             std::exception_ptr error_;     // guarded by mutex_ while workers run
         };
 
+#ifdef _WIN32
         std::optional<bool> QuerySeekPenalty(std::wstring const& volumeRoot)
         {
             wchar_t volumeName[64]{};
@@ -762,6 +844,12 @@ namespace sm
             }
             return volume;
         }
+#else
+        VolumeInfo QueryVolume(std::wstring const& path)
+        {
+            return posix::QueryVolume(path);
+        }
+#endif
 
         unsigned ChooseThreadCount(VolumeInfo const& volume)
         {
@@ -780,11 +868,13 @@ namespace sm
             return std::clamp(hardware * 3 / 4, 2u, 16u);
         }
 
+#ifdef _WIN32
         // Local NTFS drives list each entry's file ID - its record - which tells hard links apart.
         bool ListsFileIds(VolumeInfo const& volume)
         {
             return !volume.remote && EqualsIgnoringCase(volume.fileSystem, L"NTFS");
         }
+#endif
 
         // A set of record numbers, one bit each: records are dense.
         class RecordSet
@@ -856,7 +946,22 @@ namespace sm
                     }
                 }
             }
-            std::ranges::sort(names, [](LinkName const& a, LinkName const& b) {
+#ifdef _WIN32
+            auto const folderBefore = [](std::uint32_t a, std::uint32_t b) { return a < b; };
+#else
+            // A scan numbers the files in the order of their inodes; a reload
+            // numbers those new to the tree as it meets them.  The folders' own
+            // inodes decide, as the numbers of a fresh scan would.
+            std::vector<InodeTable::Key> keys;
+            auto const folderBefore = [&tree, &keys](std::uint32_t a, std::uint32_t b) {
+                if (keys.empty() && tree.inodes)
+                {
+                    keys = tree.inodes->Keys();
+                }
+                return a < keys.size() && b < keys.size() ? keys[a] < keys[b] : a < b;
+            };
+#endif
+            std::ranges::sort(names, [&folderBefore](LinkName const& a, LinkName const& b) {
                 if (a.record != b.record)
                 {
                     return a.record < b.record;
@@ -867,7 +972,7 @@ namespace sm
                 }
                 if (a.folderRecord != b.folderRecord)
                 {
-                    return a.folderRecord < b.folderRecord;
+                    return folderBefore(a.folderRecord, b.folderRecord);
                 }
                 return a.folder->Name(a.index) < b.folder->Name(b.index);
             });
@@ -1152,6 +1257,15 @@ namespace sm
 
         std::optional<FileSizes> ReadFileSizes(std::wstring const& path, std::uint32_t attributes)
         {
+#ifndef _WIN32
+            (void)attributes;  // statx reports what compressed and sparse files really take
+            std::optional<posix::FileSpace> const space = posix::ReadFileSpace(path);
+            if (!space)
+            {
+                return std::nullopt;
+            }
+            return FileSizes{ space->allocated, space->length };
+#else
             std::wstring const extended = ToExtendedLengthPath(path);
             wil::unique_hfile const file(CreateFileW(extended.c_str(), FILE_READ_ATTRIBUTES,
                                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
@@ -1168,6 +1282,7 @@ namespace sm
                 sizes.size = CompressedSize(extended).value_or(sizes.size);
             }
             return sizes;
+#endif
         }
 
         std::int64_t CountUnreadable(Folder const& root)
@@ -1186,13 +1301,20 @@ namespace sm
             tree.unreadableFolders = change >= 0 ? count + magnitude : (count > magnitude ? count - magnitude : 0);
         }
 
-        // Scans the folder at `extendedPath` into a new folder object; nothing if stopped.
-        std::unique_ptr<Folder> ScanInto(std::wstring const& extendedPath, VolumeInfo const& volume,
+        // Scans the folder at `extendedPath` of `tree` into a new folder object; nothing if stopped.
+        std::unique_ptr<Folder> ScanInto(std::wstring const& extendedPath, FolderTree const& tree,
                                          ScanProgress& progress, std::stop_token const& stop, IoCancellation& io,
                                          bool shallow)
         {
+            VolumeInfo const& volume = tree.Volume();
             auto folder = std::make_unique<Folder>();
+#ifdef _WIN32
             ParallelScan scan(progress, stop, io, volume.clusterSize, ListsFileIds(volume), shallow);
+#else
+            ParallelScan scan(progress, stop, io, volume.clusterSize, false, shallow);
+            // No watch: it adds the folders made since the scan itself.
+            scan.Use({ tree.inodes.get(), nullptr, volume.remote });
+#endif
             (void)scan.Run(*folder, extendedPath, shallow ? 1 : ChooseThreadCount(volume));
             if (stop.stop_requested())
             {
@@ -1258,10 +1380,11 @@ namespace sm
             whole = true;
             while (!relative.empty())
             {
-                std::size_t const slash = relative.find(L'\\');
-                std::wstring name(relative.substr(0, slash));
+                std::size_t const slash = relative.find(kPathSeparator);
+                std::wstring name(relative.substr(0, slash));  // NOLINT(misc-const-correctness): Windows expands it
                 relative = slash == std::wstring_view::npos ? std::wstring_view() : relative.substr(slash + 1);
-                Folder* next = ChildFolder(*folder, name, true);
+                Folder* next = ChildFolder(*folder, name, kCaseInsensitivePaths);
+#ifdef _WIN32
                 if (next == nullptr)
                 {
                     // A short name, as programs using %TEMP% report changes for example: its long form.
@@ -1276,13 +1399,14 @@ namespace sm
                         next = ChildFolder(*folder, name, true);
                     }
                 }
+#endif
                 if (next == nullptr)
                 {
                     whole = false;
                     break;
                 }
                 folder = next;
-                path.append(name).push_back(L'\\');
+                path.append(name).push_back(kPathSeparator);
             }
             return folder;
         }
@@ -1307,7 +1431,7 @@ namespace sm
     {
         IoCancellation io(stop);
         IoCancellation::Enlistment const enlisted(io);
-        return ScanInto(ToExtendedLengthPath(tree.PathOf(folder)), tree.Volume(), progress, stop, io, shallow);
+        return ScanInto(ToExtendedLengthPath(tree.PathOf(folder)), tree, progress, stop, io, shallow);
     }
 
     void ReplaceContents(FolderTree& tree, Folder& folder, std::unique_ptr<Folder> fresh)
@@ -1390,6 +1514,7 @@ namespace sm
         {
             Folder* const target = targets[i];
             std::wstring const path = ToExtendedLengthPath(tree.PathOf(*target));
+#ifdef _WIN32
             if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES)
             {
                 DWORD const error = GetLastError();
@@ -1399,7 +1524,14 @@ namespace sm
                     continue;
                 }
             }
-            std::unique_ptr<Folder> now = ScanInto(path, tree.Volume(), progress, stop, io, true);
+#else
+            if (posix::IsGone(path) && target->parent != nullptr)
+            {
+                choose(target->parent);  // gone: its folder, listed again, drops it
+                continue;
+            }
+#endif
+            std::unique_ptr<Folder> now = ScanInto(path, tree, progress, stop, io, true);
             if (!now)
             {
                 return std::nullopt;
@@ -1417,7 +1549,7 @@ namespace sm
                     continue;
                 }
                 std::unique_ptr<Folder> scanned =
-                    ScanInto(path + std::wstring(name) + L"\\", tree.Volume(), progress, stop, io, false);
+                    ScanInto(path + std::wstring(name) + kPathSeparator, tree, progress, stop, io, false);
                 if (!scanned)
                 {
                     return std::nullopt;
@@ -1445,7 +1577,7 @@ namespace sm
             {
                 break;
             }
-            std::size_t const slash = relative.rfind(L'\\');
+            std::size_t const slash = relative.rfind(kPathSeparator);
             std::wstring_view const inFolder =
                 slash == std::wstring::npos ? std::wstring_view() : std::wstring_view(relative).substr(0, slash);
             std::wstring_view const name = slash == std::wstring::npos ? std::wstring_view(relative)
@@ -1723,7 +1855,7 @@ namespace sm
         for (std::wstring_view const name : names | std::views::reverse)
         {
             path.append(name);
-            path.push_back(L'\\');
+            path.push_back(kPathSeparator);
         }
         return path;
     }
@@ -1798,6 +1930,9 @@ namespace sm
 
     void FolderTree::RefreshFreeSpace()
     {
+#ifndef _WIN32
+        (void)posix::QueryDiskSpace(rootPath_, volume_.totalBytes, volume_.freeBytes);
+#else
         ULARGE_INTEGER available{};
         ULARGE_INTEGER total{};
         ULARGE_INTEGER free{};
@@ -1806,6 +1941,7 @@ namespace sm
             volume_.totalBytes = total.QuadPart;
             volume_.freeBytes = free.QuadPart;
         }
+#endif
         UpdateSpecialEntries();
     }
 
@@ -1860,16 +1996,21 @@ namespace sm
             return notFound();
         }
         std::wstring const extendedPath = ToExtendedLengthPath(displayPath);
+#ifdef _WIN32
         DWORD const attributes = GetFileAttributesW(extendedPath.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+#else
+        if (!posix::IsFolder(extendedPath))
+#endif
         {
             return notFound();
         }
 
         VolumeInfo volume = QueryVolume(displayPath);
-        bool const wholeVolume = !volume.root.empty() && EqualsIgnoringCase(volume.root, displayPath);
+        bool const wholeVolume = !volume.root.empty() && SamePath(volume.root, displayPath);
         progress.expectedBytes.store(wholeVolume ? volume.UsedBytes() : 0, std::memory_order_relaxed);
 
+#ifdef _WIN32
         // A whole NTFS drive, with administrator rights: read its master file table.
         if (wholeVolume && options.masterFileTable)
         {
@@ -1888,20 +2029,34 @@ namespace sm
             progress.folders.store(0, std::memory_order_relaxed);
             progress.bytes.store(0, std::memory_order_relaxed);
         }
+#endif
 
         unsigned const threads = options.threads != 0 ? options.threads : ChooseThreadCount(volume);
+#ifdef _WIN32
         bool const fileIds = ListsFileIds(volume);
+#else
+        // Every file gets a record number, so that hard links are told apart on any file system.
+        auto inodes = std::make_shared<InodeTable>();
+        bool const fileIds = false;
+#endif
         // Watched from before the listing starts, so that nothing changing meanwhile is missed.
         std::shared_ptr<FolderWatch> watch = options.watch ? FolderWatch::Start(displayPath, volume.remote) : nullptr;
         auto root = std::make_unique<Folder>();
         ParallelScan scan(progress, stop, io, volume.clusterSize, fileIds);
+#ifndef _WIN32
+        if (watch && options.watchLimit != 0)
+        {
+            watch->Limit(options.watchLimit);
+        }
+        scan.Use({ inodes.get(), watch.get(), volume.remote });
+#endif
         // A live map meanwhile: what the scan has found so far.
         bool const specialEntries = wholeVolume && options.addFreeSpace;
         progress.SetSnapshotSource([&scan, &found = *root, &displayPath, volume, specialEntries](std::size_t budget) {
             std::unique_ptr<Folder> copy = scan.Snapshot(found, budget);
             return copy ? std::make_unique<FolderTree>(std::move(copy), displayPath, volume, specialEntries) : nullptr;
         });
-        auto stopSnapshots = wil::scope_exit([&progress] { progress.SetSnapshotSource({}); });
+        ScopeExit stopSnapshots([&progress]() noexcept { progress.SetSnapshotSource({}); });
         std::uint64_t const unreadable = scan.Run(*root, extendedPath, threads);
         stopSnapshots.reset();  // before the tree changes hands
         if (stop.stop_requested())
@@ -1915,11 +2070,26 @@ namespace sm
         tree->threads = threads;
         tree->unreadableFolders = unreadable;
         tree->watch = std::move(watch);
+#ifndef _WIN32
+        if (tree->watch && tree->watch->OutOfWatches())
+        {
+            // More folders than the system lets a program watch: the next reloads
+            // scan everything again, without trying to watch it all once more.
+            tree->watch.reset();
+            tree->tooBigToWatch = true;
+        }
+#endif
+#ifdef _WIN32
         if (fileIds)
         {
             tree->rootRecord = RecordOfFolder(extendedPath);
             CountHardLinksOnce(*tree);
         }
+#else
+        posix::NumberInInodeOrder(*tree, *inodes, posix::RecordOfFolder(extendedPath, *inodes));
+        tree->inodes = std::move(inodes);
+        CountHardLinksOnce(*tree);
+#endif
         tree->elapsed =
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
         result.status = ScanStatus::Completed;
@@ -1943,6 +2113,9 @@ namespace sm
             return {};
         }
 
+#ifndef _WIN32
+        return posix::NormalizePath(input);
+#else
         std::wstring path = WithoutExtendedPrefix(input);
 
         // "C:" on its own means the root of C:, not C:'s current directory.
@@ -1976,10 +2149,14 @@ namespace sm
             full.push_back(L'\\');
         }
         return full;
+#endif
     }
 
     std::wstring ToExtendedLengthPath(std::wstring_view path)
     {
+#ifndef _WIN32
+        return std::wstring(path);  // one form of path, unbounded in length (OpenDirectory)
+#else
         if (path.starts_with(kExtendedPrefix) || path.starts_with(L"\\\\.\\"))
         {
             return std::wstring(path);
@@ -1989,6 +2166,7 @@ namespace sm
             return std::wstring(kExtendedUncPrefix).append(path.substr(2));
         }
         return std::wstring(kExtendedPrefix).append(path);
+#endif
     }
 
     std::uint64_t RoundUpToCluster(std::uint64_t bytes, std::uint64_t clusterSize) noexcept
@@ -2003,6 +2181,9 @@ namespace sm
 
     bool TryEnableBackupPrivilege() noexcept
     {
+#ifndef _WIN32
+        return false;  // nothing to switch on: the superuser reads every folder anyway
+#else
         wil::unique_handle token;
         if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, token.put()))
         {
@@ -2020,5 +2201,6 @@ namespace sm
         // AdjustTokenPrivileges "succeeds" with ERROR_NOT_ALL_ASSIGNED when the
         // user does not hold the privilege at all.
         return GetLastError() == ERROR_SUCCESS;
+#endif
     }
 }

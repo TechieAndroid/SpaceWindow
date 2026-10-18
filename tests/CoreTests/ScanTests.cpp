@@ -5,11 +5,37 @@
 #include "../../src/Core/FolderTree.h"
 #include "../../src/Core/FolderWatch.h"
 #include "../../src/Core/IoCancellation.h"
+#include "../../src/Core/ScopeExit.h"
+#ifndef _WIN32
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
+#endif
 
 namespace
 {
     constexpr int kDeepLevels = 150;  // deep enough for a path far beyond MAX_PATH
+#ifdef _WIN32
+    constexpr std::wstring_view kDeepName = L"d";
+    constexpr std::size_t kLongPath = MAX_PATH;
+#else
+    // Linux takes paths of up to PATH_MAX (4096) bytes in one piece: names this
+    // long make the deep tree's path longer than that.
+    constexpr std::wstring_view kDeepName = L"a-somewhat-long-folder-name";
+    constexpr std::size_t kLongPath = PATH_MAX;
+    static_assert(kDeepLevels * (kDeepName.size() + 1) > PATH_MAX);
+#endif
 
+    // A path below a folder, written with '/' whatever the system's separator.
+    std::wstring Rel(std::wstring_view relative)
+    {
+        std::wstring path(relative);
+        std::ranges::replace(path, L'/', sm::kPathSeparator);
+        return path;
+    }
+
+#ifdef _WIN32
     std::wstring Extended(std::wstring const& path)
     {
         return sm::ToExtendedLengthPath(path);
@@ -108,43 +134,279 @@ namespace
         }
     }
 
+    // A directory junction, which the scanner must not follow.
+    void MakeAlias(std::wstring const& link, std::wstring const& target)
+    {
+        MakeJunction(link, target);
+    }
+
+    bool DeletePath(std::wstring const& path)
+    {
+        return DeleteFileW(Extended(path).c_str()) != FALSE;
+    }
+
+    bool RemoveFolder(std::wstring const& path)
+    {
+        return RemoveDirectoryW(Extended(path).c_str()) != FALSE;
+    }
+
+    bool MovePath(std::wstring const& from, std::wstring const& to)
+    {
+        return MoveFileW(Extended(from).c_str(), Extended(to).c_str()) != FALSE;
+    }
+
+    // False where the file system has no hard links.
+    bool MakeHardLink(std::wstring const& link, std::wstring const& target)
+    {
+        return CreateHardLinkW(Extended(link).c_str(), Extended(target).c_str(), nullptr) != FALSE;
+    }
+
+    void Pause(int milliseconds)
+    {
+        Sleep(static_cast<DWORD>(milliseconds));
+    }
+
+    // A new folder in %TEMP%.
+    std::wstring NewTempFolder(std::wstring_view prefix)
+    {
+        wchar_t temp[MAX_PATH + 1]{};
+        CHECK(GetTempPathW(static_cast<DWORD>(std::size(temp)), temp) != 0);
+        GUID guid{};
+        (void)CoCreateGuid(&guid);
+        wchar_t id[40]{};
+        (void)StringFromGUID2(guid, id, static_cast<int>(std::size(id)));
+        std::wstring const root = std::wstring(temp) + std::wstring(prefix) + id;
+        MakeDirectory(root);
+        return root;
+    }
+
+    // Nobody may list it (an administrator neither, without the backup privilege); anyone may delete it.
+    bool CanLockFolders()
+    {
+        return true;
+    }
+
+    void LockFolder(std::wstring const& folder)
+    {
+        PSECURITY_DESCRIPTOR descriptor = nullptr;
+        CHECK(ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(D;;0x1;;;WD)(A;;FA;;;WD)", SDDL_REVISION_1,
+                                                                   &descriptor, nullptr));
+        BOOL const set = SetFileSecurityW(Extended(folder).c_str(), DACL_SECURITY_INFORMATION, descriptor);
+        LocalFree(descriptor);
+        CHECK(set);
+    }
+#else
+    // The folder holding `path`, open, and the name in it: so that paths of any
+    // length can be made and removed (one call takes at most PATH_MAX bytes).
+    struct InFolder
+    {
+        int folder = -1;
+        std::string name;
+
+        InFolder() = default;
+        InFolder(InFolder const&) = delete;
+        InFolder& operator=(InFolder const&) = delete;
+        ~InFolder()
+        {
+            if (folder >= 0)
+            {
+                close(folder);
+            }
+        }
+    };
+
+    std::unique_ptr<InFolder> Locate(std::wstring const& path)
+    {
+        std::string native = sm::posix::ToNative(path);
+        while (native.size() > 1 && native.back() == '/')
+        {
+            native.pop_back();
+        }
+        std::size_t const slash = native.rfind('/');
+        auto at = std::make_unique<InFolder>();
+        if (slash != std::string::npos)
+        {
+            at->folder = sm::posix::OpenDirectory(slash == 0 ? std::string("/") : native.substr(0, slash));
+            at->name = native.substr(slash + 1);
+        }
+        return at;
+    }
+
+    void WriteFileOfSize(std::wstring const& path, std::size_t size)
+    {
+        auto const at = Locate(path);
+        CHECK(at->folder >= 0);
+        int const file = openat(at->folder, at->name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        CHECK(file >= 0);
+        std::vector<char> const data(size, 'x');
+        std::size_t written = 0;
+        while (written < size)
+        {
+            ssize_t const now = write(file, data.data() + written, size - written);
+            if (now <= 0)
+            {
+                break;
+            }
+            written += static_cast<std::size_t>(now);
+        }
+        close(file);
+        CHECK_EQ(written, size);
+    }
+
+    void MakeDirectory(std::wstring const& path)
+    {
+        auto const at = Locate(path);
+        CHECK(at->folder >= 0 && mkdirat(at->folder, at->name.c_str(), 0755) == 0);
+    }
+
+    // A symbolic link, which the scanner must not follow.
+    void MakeAlias(std::wstring const& link, std::wstring const& target)
+    {
+        CHECK(symlink(sm::posix::ToNative(target).c_str(), sm::posix::ToNative(link).c_str()) == 0);
+    }
+
+    bool DeletePath(std::wstring const& path)
+    {
+        auto const at = Locate(path);
+        return at->folder >= 0 && unlinkat(at->folder, at->name.c_str(), 0) == 0;
+    }
+
+    bool RemoveFolder(std::wstring const& path)
+    {
+        auto const at = Locate(path);
+        return at->folder >= 0 && unlinkat(at->folder, at->name.c_str(), AT_REMOVEDIR) == 0;
+    }
+
+    bool MovePath(std::wstring const& from, std::wstring const& to)
+    {
+        return rename(sm::posix::ToNative(from).c_str(), sm::posix::ToNative(to).c_str()) == 0;
+    }
+
+    // False where the file system has no hard links.
+    bool MakeHardLink(std::wstring const& link, std::wstring const& target)
+    {
+        return ::link(sm::posix::ToNative(target).c_str(), sm::posix::ToNative(link).c_str()) == 0;
+    }
+
+    void Pause(int milliseconds)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+    }
+
+    // A new folder in $TMPDIR (or /tmp).
+    std::wstring NewTempFolder(std::wstring_view prefix)
+    {
+        static std::atomic<unsigned> serial = 0;
+        std::string const name = sm::posix::ToNative(prefix) + std::to_string(getpid()) + "-" +
+                                 std::to_string(serial++) + "-" +
+                                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        std::filesystem::path const path = std::filesystem::temp_directory_path() / name;
+        CHECK(mkdir(path.c_str(), 0755) == 0);
+        return sm::posix::FromNative(path.string());
+    }
+
+    // Nobody may list it - but the superuser, who lists everything.
+    bool CanLockFolders()
+    {
+        return geteuid() != 0;
+    }
+
+    void LockFolder(std::wstring const& folder)
+    {
+        CHECK(chmod(sm::posix::ToNative(folder).c_str(), 0) == 0);
+    }
+
+    // Deletes a tree without following links, whatever its depth and the length
+    // of its paths: one open folder per level, as the scanner does.
+    void DeleteTree(std::wstring const& root)
+    {
+        struct Level
+        {
+            DIR* listing;
+            std::string name;  // in the level above
+        };
+        int const top = sm::posix::OpenDirectory(sm::posix::ToNative(root));
+        DIR* const first = top >= 0 ? fdopendir(top) : nullptr;
+        if (first == nullptr)
+        {
+            return;
+        }
+        std::vector<Level> levels{ { first, {} } };
+        while (!levels.empty())
+        {
+            DIR* const listing = levels.back().listing;
+            dirent const* const entry = readdir(listing);
+            if (entry == nullptr)
+            {
+                std::string const name = levels.back().name;
+                closedir(listing);
+                levels.pop_back();
+                if (!levels.empty())
+                {
+                    (void)unlinkat(dirfd(levels.back().listing), name.c_str(), AT_REMOVEDIR);
+                }
+                continue;
+            }
+            std::string_view const name(entry->d_name);
+            if (name == "." || name == "..")
+            {
+                continue;
+            }
+            int const folder = dirfd(listing);
+            struct stat status{};
+            if (fstatat(folder, entry->d_name, &status, AT_SYMLINK_NOFOLLOW) == 0 && S_ISDIR(status.st_mode))
+            {
+                [[maybe_unused]] int const unlocked = fchmodat(folder, entry->d_name, 0700, 0);  // a locked folder too
+                int const inside = openat(folder, entry->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                DIR* const next = inside >= 0 ? fdopendir(inside) : nullptr;
+                if (next != nullptr)
+                {
+                    levels.push_back({ next, std::string(name) });
+                }
+                else
+                {
+                    (void)unlinkat(folder, entry->d_name, AT_REMOVEDIR);
+                }
+            }
+            else
+            {
+                (void)unlinkat(folder, entry->d_name, 0);
+            }
+        }
+        (void)RemoveFolder(root);
+    }
+#endif
+
     // A small tree with known contents:
     //   a.bin (10000)  b.bin (1 MiB)  empty.txt (0)
     //   sub1\c.bin (4096)  sub1\sub2\d.bin (300000)
     //   ファイル Ünïcödé\Ünïcödé.txt (5000)
-    //   link -> sub1 (a junction: must not be followed or counted)
-    //   deep\d\d\...\d\leaf.bin (2000), kDeepLevels levels of "d"
+    //   link -> sub1 (a junction, or a symbolic link: must not be followed or counted)
+    //   deep\d\d\...\d\leaf.bin (2000), kDeepLevels levels of kDeepName
     class TestTree
     {
     public:
         TestTree()
         {
-            wchar_t temp[MAX_PATH + 1]{};
-            CHECK(GetTempPathW(static_cast<DWORD>(std::size(temp)), temp) != 0);
-            GUID guid{};
-            (void)CoCreateGuid(&guid);
-            wchar_t id[40]{};
-            (void)StringFromGUID2(guid, id, static_cast<int>(std::size(id)));
-            std::wstring const root = std::wstring(temp) + L"SpaceWindowTest-" + id;
-            MakeDirectory(root);
-            root_ = sm::NormalizeScanPath(root);  // once it exists, as the scanner will see it
+            root_ = sm::NormalizeScanPath(
+                NewTempFolder(L"SpaceWindowTest-"));  // once it exists, as the scanner will see it
 
             WriteFileOfSize(root_ + L"a.bin", 10000);
             WriteFileOfSize(root_ + L"b.bin", 1 << 20);
             WriteFileOfSize(root_ + L"empty.txt", 0);
             MakeDirectory(root_ + L"sub1");
-            WriteFileOfSize(root_ + L"sub1\\c.bin", 4096);
-            MakeDirectory(root_ + L"sub1\\sub2");
-            WriteFileOfSize(root_ + L"sub1\\sub2\\d.bin", 300000);
+            WriteFileOfSize(root_ + Rel(L"sub1/c.bin"), 4096);
+            MakeDirectory(root_ + Rel(L"sub1/sub2"));
+            WriteFileOfSize(root_ + Rel(L"sub1/sub2/d.bin"), 300000);
             MakeDirectory(root_ + L"ファイル Ünïcödé");
-            WriteFileOfSize(root_ + L"ファイル Ünïcödé\\Ünïcödé.txt", 5000);
-            MakeJunction(root_ + L"link", root_ + L"sub1");
+            WriteFileOfSize(root_ + Rel(L"ファイル Ünïcödé/Ünïcödé.txt"), 5000);
+            MakeAlias(root_ + L"link", root_ + L"sub1");
 
-            std::wstring deep = root_ + L"deep\\";
+            std::wstring deep = root_ + L"deep" + sm::kPathSeparator;
             MakeDirectory(deep);
             for (int i = 0; i < kDeepLevels; ++i)
             {
-                deep += L"d\\";
+                deep.append(kDeepName).push_back(sm::kPathSeparator);
                 MakeDirectory(deep);
             }
             leaf_ = deep + L"leaf.bin";
@@ -264,7 +526,7 @@ TEST_CASE(ScanCountsEverythingAndSkipsJunctions)
     CHECK_EQ(result.tree->unreadableFolders, std::uint64_t{ 0 });
     CHECK(!result.tree->IsWholeVolume());
 
-    // The junction would have added sub1's 304096 bytes a second time.
+    // The junction (or symbolic link) would have added sub1's 304096 bytes a second time.
     CHECK(FindChild(root, L"link") == nullptr);
 
     // Files report what they occupy on disk, which is at least their length
@@ -283,10 +545,9 @@ TEST_CASE(ScanCountsHardLinksOnce)
     TestTree const tree;
     sm::ScanResult const without = Scan(tree.Root());
     // A second name for sub1\c.bin (4096 bytes), in the root folder.
-    if (!CreateHardLinkW(Extended(tree.Root() + L"c-link.bin").c_str(), Extended(tree.Root() + L"sub1\\c.bin").c_str(),
-                         nullptr))
+    if (!MakeHardLink(tree.Root() + L"c-link.bin", tree.Root() + Rel(L"sub1/c.bin")))
     {
-        return;  // the temporary folder is not on NTFS
+        return;  // the temporary folder's file system has no hard links
     }
     sm::ScanResult const with = Scan(tree.Root());
     sm::Folder& root = *with.tree->Root();
@@ -364,14 +625,14 @@ TEST_CASE(ReloadOfWatchedFoldersMatchesAFreshScan)
     // Files made, rewritten and deleted; folders made, moved, renamed and deleted.
     WriteFileOfSize(tree.Root() + L"new.bin", 70000);
     WriteFileOfSize(tree.Root() + L"a.bin", 50000);
-    CHECK(DeleteFileW(Extended(tree.Root() + L"b.bin").c_str()));
+    CHECK(DeletePath(tree.Root() + L"b.bin"));
     MakeDirectory(tree.Root() + L"made");
-    WriteFileOfSize(tree.Root() + L"made\\inside.bin", 9000);
-    CHECK(MoveFileW(Extended(tree.Root() + L"sub1\\sub2").c_str(), Extended(tree.Root() + L"moved").c_str()));
-    CHECK(MoveFileW(Extended(tree.Root() + L"sub1").c_str(), Extended(tree.Root() + L"renamed").c_str()));
-    CHECK(DeleteFileW(Extended(tree.Root() + L"ファイル Ünïcödé\\Ünïcödé.txt").c_str()));
-    CHECK(RemoveDirectoryW(Extended(tree.Root() + L"ファイル Ünïcödé").c_str()));
-    Sleep(300);  // the watch records changes on a thread of its own
+    WriteFileOfSize(tree.Root() + Rel(L"made/inside.bin"), 9000);
+    CHECK(MovePath(tree.Root() + Rel(L"sub1/sub2"), tree.Root() + L"moved"));
+    CHECK(MovePath(tree.Root() + L"sub1", tree.Root() + L"renamed"));
+    CHECK(DeletePath(tree.Root() + Rel(L"ファイル Ünïcödé/Ünïcödé.txt")));
+    CHECK(RemoveFolder(tree.Root() + L"ファイル Ünïcödé"));
+    Pause(300);  // the watch records changes on a thread of its own
 
     sm::FolderWatch::Changes const changes = scanned.watch->Take();
     CHECK(changes.complete);
@@ -396,20 +657,31 @@ TEST_CASE(ReloadReadsFilesKeptOpen)
     sm::FolderTree& scanned = *result.tree;
 
     // A download in progress: a folder listing shows it as it was when last closed.
+#ifdef _WIN32
     wil::unique_hfile const download(CreateFileW(Extended(tree.Root() + L"download.part").c_str(), GENERIC_WRITE,
                                                  FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
                                                  nullptr));
     CHECK(static_cast<bool>(download));
+#else
+    int const download = open(sm::posix::ToNative(tree.Root() + L"download.part").c_str(),
+                              O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    CHECK(download >= 0);
+    sm::ScopeExit const closeDownload([download]() noexcept { close(download); });
+#endif
     std::vector<char> const chunk(std::size_t{ 1 } << 20, 'x');
     auto const write = [&](int megabytes) {
         for (int i = 0; i < megabytes; ++i)
         {
+#ifdef _WIN32
             DWORD written = 0;
             CHECK(WriteFile(download.get(), chunk.data(), static_cast<DWORD>(chunk.size()), &written, nullptr));
+#else
+            CHECK(::write(download, chunk.data(), chunk.size()) == static_cast<ssize_t>(chunk.size()));
+#endif
         }
     };
     auto const reload = [&] {
-        Sleep(300);  // the watch records changes on a thread of its own
+        Pause(300);  // the watch records changes on a thread of its own
         sm::FolderWatch::Changes const changes = scanned.watch->Take();
         std::optional<sm::FolderReload> prepared =
             sm::PrepareReload(scanned, changes.folders, changes.files, progress, std::stop_token{});
@@ -431,7 +703,9 @@ TEST_CASE(ReloadReadsFilesKeptOpen)
     // Nothing reports it growing further while it stays open, but it is read again.
     write(2);
     CHECK_EQ(reload(), std::uint64_t{ 5 } << 20);
-    CHECK(!scanned.growingFiles.empty());
+#ifdef _WIN32
+    CHECK(!scanned.growingFiles.empty());  // (a Linux listing never lags behind a file)
+#endif
     CheckConsistency(*scanned.Root());
 }
 
@@ -440,7 +714,7 @@ TEST_CASE(LiveSnapshotsShowWhatWasFoundSoFar)
     TestTree const tree;
     for (int folder = 0; folder < 30; ++folder)  // enough for the scan to take a while
     {
-        std::wstring const path = tree.Root() + L"many" + std::to_wstring(folder) + L"\\";
+        std::wstring const path = tree.Root() + L"many" + std::to_wstring(folder) + sm::kPathSeparator;
         MakeDirectory(path);
         for (int file = 0; file < 20; ++file)
         {
@@ -466,7 +740,7 @@ TEST_CASE(LiveSnapshotsShowWhatWasFoundSoFar)
             }
             else
             {
-                Sleep(1);
+                Pause(1);
             }
         }
     });
@@ -528,8 +802,8 @@ TEST_CASE(RescanningAFolderReplacesWhatItHolds)
     sm::Folder* const sub1 = FindChild(*scanned.Root(), L"sub1");
     CHECK(sub1 != nullptr);
 
-    WriteFileOfSize(tree.Root() + L"sub1\\more.bin", 123456);
-    CHECK(DeleteFileW(Extended(tree.Root() + L"sub1\\c.bin").c_str()));
+    WriteFileOfSize(tree.Root() + Rel(L"sub1/more.bin"), 123456);
+    CHECK(DeletePath(tree.Root() + Rel(L"sub1/c.bin")));
     sm::ScanProgress progress;
     std::unique_ptr<sm::Folder> fresh = sm::ScanAgain(scanned, *sub1, progress, std::stop_token{});
     CHECK(fresh != nullptr);
@@ -541,16 +815,14 @@ TEST_CASE(RescanningAFolderReplacesWhatItHolds)
 
 TEST_CASE(UnreadableFoldersAreListed)
 {
+    if (!CanLockFolders())
+    {
+        return;
+    }
     TestTree const tree;
-    std::wstring const locked = tree.Root() + L"locked\\";
+    std::wstring const locked = tree.Root() + L"locked" + sm::kPathSeparator;
     MakeDirectory(locked);
-    // Nobody may list it (an administrator neither, without the backup privilege); anyone may delete it.
-    PSECURITY_DESCRIPTOR descriptor = nullptr;
-    CHECK(ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(D;;0x1;;;WD)(A;;FA;;;WD)", SDDL_REVISION_1,
-                                                               &descriptor, nullptr));
-    BOOL const set = SetFileSecurityW(Extended(locked).c_str(), DACL_SECURITY_INFORMATION, descriptor);
-    LocalFree(descriptor);
-    CHECK(set);
+    LockFolder(locked);
 
     sm::ScanResult const result = Scan(tree.Root());
     CHECK_EQ(result.tree->unreadableFolders, std::uint64_t{ 1 });
@@ -559,6 +831,7 @@ TEST_CASE(UnreadableFoldersAreListed)
     CHECK(unreadable.front() == locked);
 }
 
+#ifdef _WIN32
 TEST_CASE(StoppingBreaksOffBlockedIo)
 {
     // A read from a pipe nobody writes to blocks, like a folder listing on a
@@ -596,7 +869,59 @@ TEST_CASE(StoppingBreaksOffBlockedIo)
     CHECK_EQ(error.load(), static_cast<DWORD>(ERROR_OPERATION_ABORTED));
     CHECK(std::chrono::steady_clock::now() - stopped < std::chrono::seconds(2));
 }
+#else
+TEST_CASE(StoppingBreaksOffBlockedIo)
+{
+    // A read from a pipe nobody writes to blocks, like a listing on a FUSE file
+    // system that stopped answering - until the stop interrupts it.
+    std::array<int, 2> ends{ -1, -1 };
+    CHECK(pipe(ends.data()) == 0);
+    std::stop_source stop;  // NOLINT(misc-const-correctness): request_stop() is not const in the standard
+    sm::IoCancellation io(stop.get_token());
+    std::atomic<bool> enlisted = false;
+    std::atomic<bool> finished = false;
+    std::atomic<int> error = 0;
+    std::thread reader([&] {
+        sm::IoCancellation::Enlistment const enlistment(io);
+        enlisted = true;
+        char byte = 0;
+        if (read(ends[0], &byte, 1) < 0)
+        {
+            error = errno;
+        }
+        finished = true;
+    });
+    while (!enlisted)
+    {
+        Pause(1);
+    }
+    Pause(100);  // time to block in read
+    auto const stopped = std::chrono::steady_clock::now();
+    stop.request_stop();
+    // Should the read not be interrupted, closing the pipe ends it: the test fails rather than hangs.
+    for (int i = 0; i < 500 && !finished; ++i)
+    {
+        Pause(10);
+    }
+    if (!finished)
+    {
+        close(ends[1]);
+        ends[1] = -1;
+    }
+    reader.join();
+    for (int const end : ends)
+    {
+        if (end >= 0)
+        {
+            close(end);
+        }
+    }
+    CHECK_EQ(error.load(), EINTR);
+    CHECK(std::chrono::steady_clock::now() - stopped < std::chrono::seconds(2));
+}
+#endif
 
+#ifdef _WIN32
 TEST_CASE(ScanMeasuresFilesCompressedByWindows)
 {
     // compact.exe's compression: folder listings show such a file taking no space.
@@ -651,6 +976,44 @@ TEST_CASE(ScanMeasuresFilesCompressedByWindows)
     CHECK_EQ(found->logicalSize, std::uint64_t{ length });
     CHECK_EQ(found->size, real);
 }
+#else
+TEST_CASE(ScanMeasuresSparseFiles)
+{
+    // A file 64 MiB long that holds a hole and a byte: it takes a block or two.
+    TestTree const tree;
+    std::wstring const path = tree.Root() + L"sparse.img";
+    std::uint64_t const length = std::uint64_t{ 64 } << 20;
+    {
+        int const file = open(sm::posix::ToNative(path).c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        CHECK(file >= 0);
+        CHECK(pwrite(file, "x", 1, static_cast<off_t>(length - 1)) == 1);
+        close(file);
+    }
+    struct stat status{};
+    CHECK(stat(sm::posix::ToNative(path).c_str(), &status) == 0);
+    std::uint64_t const real = static_cast<std::uint64_t>(status.st_blocks) * 512;
+    if (real >= length)
+    {
+        return;  // a file system without holes
+    }
+
+    sm::ScanResult const result = Scan(tree.Root());
+    sm::Folder const& root = *result.tree->Root();
+    sm::Entry const* found = nullptr;
+    for (std::size_t i = 0; i < root.entries.size(); ++i)
+    {
+        if (root.Name(i) == L"sparse.img")
+        {
+            found = &root.entries[i];
+        }
+    }
+    CHECK(found != nullptr);
+    CHECK_EQ(found->logicalSize, length);
+    CHECK_EQ(found->size, real);
+    CHECK((found->attributes & FILE_ATTRIBUTE_SPARSE_FILE) != 0);
+    CHECK_EQ(root.logicalTotal, TestTree::kLogicalBytes + length);
+}
+#endif
 
 TEST_CASE(ScanHandlesUnicodeAndLongPaths)
 {
@@ -668,12 +1031,12 @@ TEST_CASE(ScanHandlesUnicodeAndLongPaths)
     sm::Folder* folder = FindChild(*folderTree.Root(), L"deep");
     for (int i = 0; folder != nullptr && i < kDeepLevels; ++i)
     {
-        folder = FindChild(*folder, L"d");
+        folder = FindChild(*folder, kDeepName);
     }
     CHECK(folder != nullptr);
     CHECK_EQ(folder->entries.size(), std::size_t{ 1 });
     CHECK_EQ(folder->entries[0].logicalSize, std::uint64_t{ 2000 });
-    CHECK(tree.Leaf().size() > MAX_PATH);
+    CHECK(tree.Leaf().size() > kLongPath);
     CHECK_EQ(folderTree.PathOf(*folder, 0), tree.Leaf());
 }
 
@@ -738,7 +1101,7 @@ TEST_CASE(ScanReportsMissingPaths)
 TEST_CASE(ScanCanBeCancelled)
 {
     TestTree const tree;
-    std::stop_source stop;
+    std::stop_source stop;  // NOLINT(misc-const-correctness): request_stop() is not const in the standard
     stop.request_stop();
     sm::ScanProgress progress;
     sm::ScanResult const before = sm::ScanFolder(tree.Root(), progress, stop.get_token());
@@ -746,8 +1109,12 @@ TEST_CASE(ScanCanBeCancelled)
     CHECK(before.tree == nullptr);
 
     // Cancel a long scan part-way: it must stop promptly.
+#ifdef _WIN32
     wchar_t windows[MAX_PATH + 1]{};
     CHECK(GetWindowsDirectoryW(windows, static_cast<UINT>(std::size(windows))) != 0);
+#else
+    std::wstring const windows = L"/usr";  // big enough to take a while
+#endif
     std::stop_source midway;
     sm::ScanProgress progress2;
     auto const started = std::chrono::steady_clock::now();
@@ -769,9 +1136,13 @@ TEST_CASE(ScanCanBeCancelled)
 
 TEST_CASE(WholeDriveGetsFreeAndUnscannedSpace)
 {
+#ifdef _WIN32
     wchar_t windows[MAX_PATH + 1]{};
     CHECK(GetWindowsDirectoryW(windows, static_cast<UINT>(std::size(windows))) != 0);
     std::wstring const drive = std::wstring(windows, 3);  // "C:\"
+#else
+    std::wstring const drive = L"/";
+#endif
 
     // Scanning a whole system drive is slow, so build the tree by hand instead:
     // what matters is how a whole-volume tree treats its pseudo-entries.
@@ -802,6 +1173,7 @@ TEST_CASE(WholeDriveGetsFreeAndUnscannedSpace)
     CHECK_EQ(tree.Root()->entries.size(), std::size_t{ 3 });
 }
 
+#ifdef _WIN32
 TEST_CASE(NormalizeScanPathCanonicalizes)
 {
     wchar_t windows[MAX_PATH + 1]{};
@@ -839,6 +1211,161 @@ TEST_CASE(ExtendedLengthPaths)
     CHECK_EQ(sm::ToExtendedLengthPath(L"\\\\?\\C:\\x\\"), std::wstring(L"\\\\?\\C:\\x\\"));
     CHECK_EQ(sm::ToExtendedLengthPath(L"\\\\.\\C:"), std::wstring(L"\\\\.\\C:"));
 }
+#else
+TEST_CASE(NormalizeScanPathCanonicalizes)
+{
+    TestTree const tree;
+    std::wstring const& root = tree.Root();
+    CHECK_EQ(sm::NormalizeScanPath(L"  \"" + root + L"sub1/../sub1//sub2\"  "), root + L"sub1/sub2/");
+    CHECK_EQ(sm::NormalizeScanPath(root + L"link"), root + L"sub1/");             // a symbolic link: where it leads
+    CHECK_EQ(sm::NormalizeScanPath(root + L"missing/x/.."), root + L"missing/");  // missing paths keep their form
+    CHECK_EQ(sm::NormalizeScanPath(L"/"), std::wstring(L"/"));
+    CHECK_EQ(sm::NormalizeScanPath(L"   "), std::wstring());
+
+    // A relative path is relative to the current folder.
+    std::filesystem::path const current = std::filesystem::current_path();
+    std::filesystem::current_path(sm::posix::ToNative(root));
+    std::wstring const relative = sm::NormalizeScanPath(L"sub1");
+    std::filesystem::current_path(current);
+    CHECK_EQ(relative, root + L"sub1/");
+}
+
+TEST_CASE(NamesThatAreNotUtf8RoundTrip)
+{
+    // Linux file names are bytes: one that is not UTF-8 is still listed, and still reached.
+    TestTree const tree;
+    std::string const name = "caf\xE9-latin1.txt";  // ISO 8859-1, as old archives have it
+    std::string const path = sm::posix::ToNative(tree.Root()) + name;
+    int const file = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    CHECK(file >= 0);
+    CHECK(write(file, "hello", 5) == 5);
+    close(file);
+
+    sm::ScanResult const result = Scan(tree.Root());
+    sm::Folder const& root = *result.tree->Root();
+    std::optional<std::size_t> found;
+    for (std::size_t i = 0; i < root.entries.size(); ++i)
+    {
+        if (sm::posix::ToNative(root.Name(i)) == name)
+        {
+            found = i;
+        }
+    }
+    CHECK(found.has_value());
+    CHECK_EQ(root.entries[*found].logicalSize, std::uint64_t{ 5 });
+    CHECK(sm::posix::ToNative(result.tree->PathOf(root, *found)) == path);
+    CHECK(sm::ReadSizeOnDisk(result.tree->PathOf(root, *found), 0).has_value());
+}
+
+TEST_CASE(NamesThatAreNotUtf8GoToTheTrashWhole)
+{
+    // The freedesktop.org trash, in a scratch $XDG_DATA_HOME on the tree's file system.
+    TestTree const tree;
+    std::string const root = sm::posix::ToNative(tree.Root());
+    std::string const trash = root + "data/Trash";
+    char const* const saved = std::getenv("XDG_DATA_HOME");
+    std::optional<std::string> const before = saved != nullptr ? std::optional<std::string>(saved) : std::nullopt;
+    CHECK(setenv("XDG_DATA_HOME", (root + "data").c_str(), 1) == 0);
+    sm::ScopeExit const restore([&before]() noexcept {
+        (void)(before ? setenv("XDG_DATA_HOME", before->c_str(), 1) : unsetenv("XDG_DATA_HOME"));
+    });
+    auto const read = [](std::string const& path) {
+        std::ifstream file(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(file), {});
+    };
+    auto const escaped = [](std::string_view path) {
+        std::string text;
+        for (char const c : path)
+        {
+            auto const byte = static_cast<unsigned char>(c);
+            if ((std::isalnum(byte) != 0 && byte < 0x80) || std::string_view("/-._~").find(c) != std::string_view::npos)
+            {
+                text.push_back(c);
+                continue;
+            }
+            std::array<char, 4> hex{};
+            (void)std::snprintf(hex.data(), hex.size(), "%%%02X", byte);
+            text += hex.data();
+        }
+        return text;
+    };
+
+    std::string const name = "caf\xE9.txt";  // ISO 8859-1
+    for (int round = 1; round <= 2; ++round)
+    {
+        WriteFileOfSize(sm::posix::FromNative(root + name), 5);
+        CHECK(sm::posix::MoveToTrash(sm::posix::FromNative(root + name)));
+        CHECK(access((root + name).c_str(), F_OK) != 0);
+        // The second goes beside the first, under a name of its own; both remember where they were.
+        std::string const kept = round == 1 ? name : name + ".2";
+        CHECK(access(std::string(trash).append("/files/").append(kept).c_str(), F_OK) == 0);
+        std::string const info = read(std::string(trash).append("/info/").append(kept).append(".trashinfo"));
+        CHECK(info.starts_with("[Trash Info]\nPath=" + escaped(root + name) + "\nDeletionDate=20"));
+    }
+    // A folder goes with what it holds.
+    CHECK(sm::posix::MoveToTrash(tree.Root() + L"sub1"));
+    CHECK(access((trash + "/files/sub1/sub2/d.bin").c_str(), F_OK) == 0);
+    CHECK(!sm::posix::MoveToTrash(tree.Root() + L"no such file"));
+}
+
+TEST_CASE(MountPointsAreReadAsTheSystemNamesThem)
+{
+    // /proc/self/mountinfo escapes space, tab, newline and backslash, and
+    // leaves every other byte as it is - a name that is not UTF-8 too.
+    std::string const text = "36 35 98:0 /mnt1 /mnt/parent rw,noatime master:1 - ext3 /dev/root rw,errors=continue\n"
+                             "29 1 259:2 / / rw,relatime shared:1 - xfs /dev/nvme0n1p2 rw\n"
+                             "51 29 8:17 / /run/media/me/My\\040Drive rw,nosuid - vfat /dev/sdb1 rw\n"
+                             "52 29 8:18 / /run/media/me/caf\xE9 rw - ext4 /dev/sdb2 rw\n"
+                             "53 29 0:45 / /mnt/back\\134slash rw - tmpfs tmpfs rw\n"
+                             "not a mount\n";
+    std::vector<sm::posix::MountEntry> const mounts = sm::posix::ParseMountInfo(text);
+    CHECK_EQ(mounts.size(), std::size_t{ 5 });
+    CHECK(mounts[0].major == 98 && mounts[0].minor == 0 && mounts[0].point == "/mnt/parent");
+    CHECK(mounts[0].type == "ext3" && mounts[0].source == "/dev/root");
+    CHECK(mounts[1].point == "/" && mounts[1].major == 259 && mounts[1].minor == 2);
+    CHECK(mounts[2].point == "/run/media/me/My Drive");
+    CHECK(mounts[3].point == "/run/media/me/caf\xE9");
+    CHECK(mounts[4].point == "/mnt/back\\slash" && mounts[4].type == "tmpfs");
+    CHECK(!sm::posix::MountedFileSystems().empty());  // this system's own
+}
+
+TEST_CASE(FoldersThatListButCannotBeSearchedAreUnreadable)
+{
+    if (!CanLockFolders())
+    {
+        return;
+    }
+    // Read but no search permission (r--): the names list, nothing about them does.
+    TestTree const tree;
+    std::wstring const listed = tree.Root() + L"names-only" + sm::kPathSeparator;
+    MakeDirectory(listed);
+    WriteFileOfSize(listed + L"inside.bin", 4096);
+    CHECK(chmod(sm::posix::ToNative(listed).c_str(), 0444) == 0);
+
+    sm::ScanResult const result = Scan(tree.Root());
+    CHECK_EQ(result.tree->unreadableFolders, std::uint64_t{ 1 });
+    std::vector<std::wstring> const unreadable = result.tree->UnreadableFolders();
+    CHECK(unreadable.size() == 1 && unreadable.front() == listed);
+}
+
+TEST_CASE(TreesWithMoreFoldersThanTheWatchTakesAreNotWatched)
+{
+    // Past the watches it may have, the watch gives up - and says why, so that
+    // scans of the tree again do not try to watch it all once more.
+    TestTree const tree;
+    sm::ScanProgress progress;
+    sm::ScanOptions options;
+    options.watch = true;
+    options.watchLimit = 2;
+    sm::ScanResult const big = sm::ScanFolder(tree.Root(), progress, std::stop_token{}, options);
+    CHECK(big.status == sm::ScanStatus::Completed);
+    CHECK(big.tree->watch == nullptr && big.tree->tooBigToWatch);
+
+    options.watchLimit = 10'000;
+    sm::ScanResult const watched = sm::ScanFolder(tree.Root(), progress, std::stop_token{}, options);
+    CHECK(watched.tree->watch != nullptr && !watched.tree->tooBigToWatch);
+}
+#endif
 
 TEST_CASE(RoundUpToClusterRoundsUp)
 {
@@ -885,7 +1412,7 @@ TEST_CASE(ReloadKeepsHardLinksAndUnreadableFoldersAsAFreshScanWould)
     CHECK(result.tree != nullptr && result.tree->watch != nullptr);
     sm::FolderTree& scanned = *result.tree;
     auto const reload = [&] {
-        Sleep(300);  // the watch records changes on a thread of its own
+        Pause(300);  // the watch records changes on a thread of its own
         sm::FolderWatch::Changes const changes = scanned.watch->Take();
         CHECK(changes.complete);
         std::optional<sm::FolderReload> prepared =
@@ -898,29 +1425,27 @@ TEST_CASE(ReloadKeepsHardLinksAndUnreadableFoldersAsAFreshScanWould)
     };
 
     // A second name for sub1\c.bin, nearer the root: the space goes with it.
-    if (!CreateHardLinkW(Extended(tree.Root() + L"c-link.bin").c_str(), Extended(tree.Root() + L"sub1\\c.bin").c_str(),
-                         nullptr))
+    if (!MakeHardLink(tree.Root() + L"c-link.bin", tree.Root() + Rel(L"sub1/c.bin")))
     {
-        return;  // the temporary folder is not on NTFS
+        return;  // the temporary folder's file system has no hard links
     }
     reload();
     CHECK(scanned.hardLinks);
     // That name goes: the space comes back to sub1\c.bin, read from the file.
-    CHECK(DeleteFileW(Extended(tree.Root() + L"c-link.bin").c_str()));
+    CHECK(DeletePath(tree.Root() + L"c-link.bin"));
     reload();
 
     // A folder nobody may list comes, and goes.
-    std::wstring const locked = tree.Root() + L"locked\\";
+    if (!CanLockFolders())
+    {
+        return;
+    }
+    std::wstring const locked = tree.Root() + L"locked" + sm::kPathSeparator;
     MakeDirectory(locked);
-    PSECURITY_DESCRIPTOR descriptor = nullptr;
-    CHECK(ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(D;;0x1;;;WD)(A;;FA;;;WD)", SDDL_REVISION_1,
-                                                               &descriptor, nullptr));
-    BOOL const set = SetFileSecurityW(Extended(locked).c_str(), DACL_SECURITY_INFORMATION, descriptor);
-    LocalFree(descriptor);
-    CHECK(set);
+    LockFolder(locked);
     reload();
     CHECK_EQ(scanned.unreadableFolders, std::uint64_t{ 1 });
-    CHECK(RemoveDirectoryW(Extended(locked).c_str()));
+    CHECK(RemoveFolder(locked));
     reload();
     CHECK_EQ(scanned.unreadableFolders, std::uint64_t{ 0 });
 }

@@ -19,8 +19,8 @@
 
 namespace sm
 {
-    // A letter as drawn: its width in pixels, and how many UTF-16 code units
-    // make it (a letter with its accents, both halves of a surrogate pair).
+    // A letter as drawn: its width in pixels, and how many wide characters make
+    // it (a letter with its accents; on Windows, both halves of a surrogate pair).
     struct Cluster
     {
         float width = 0.0f;

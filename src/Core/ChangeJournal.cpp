@@ -9,6 +9,7 @@ namespace sm
 {
     namespace
     {
+#ifdef _WIN32  // reading the journal
         using fields::At;
         using ntfs::Record32;
 
@@ -30,6 +31,7 @@ namespace sm
 
         // A journal page: entries never straddle one, so each starts with an entry.
         constexpr std::int64_t kJournalPage = 4096;
+#endif
 
         bool IsLarge(Entry const& entry) noexcept
         {
@@ -265,6 +267,7 @@ namespace sm
         }
     }
 
+#ifdef _WIN32
     std::optional<JournalPosition> CurrentJournalPosition(ntfs::Volume const& volume)
     {
         USN_JOURNAL_DATA_V0 journal{};
@@ -459,6 +462,7 @@ namespace sm
         result.status = JournalReadStatus::Ready;
         return result;
     }
+#endif
 
     std::vector<std::uint32_t> LargeFiles(FolderTree& tree)
     {

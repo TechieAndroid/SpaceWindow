@@ -6,6 +6,11 @@
 #include "Format.h"
 
 #include "Lang.h"
+#ifndef _WIN32
+#include "Posix.h"
+
+#include <ctime>
+#endif
 
 namespace sm
 {
@@ -106,6 +111,7 @@ namespace sm
 
     std::wstring FormatFileTime(std::uint64_t fileTimeUtc, Lang const& lang)
     {
+#ifdef _WIN32
         FILETIME utc{};
         utc.dwLowDateTime = static_cast<DWORD>(fileTimeUtc);
         utc.dwHighDateTime = static_cast<DWORD>(fileTimeUtc >> 32);
@@ -116,6 +122,25 @@ namespace sm
         {
             return {};
         }
+#else
+        // FileTimeToSystemTime takes dates up to the year 30827.
+        if (fileTimeUtc >= 0x8000'0000'0000'0000ull)
+        {
+            return {};
+        }
+        auto const seconds = static_cast<std::time_t>(posix::ToUnixTime(fileTimeUtc));
+        std::tm time{};
+        if (localtime_r(&seconds, &time) == nullptr)
+        {
+            return {};
+        }
+        struct
+        {
+            unsigned wDay, wMonth, wYear, wHour, wMinute, wSecond;
+        } const local{ static_cast<unsigned>(time.tm_mday),        static_cast<unsigned>(time.tm_mon + 1),
+                       static_cast<unsigned>(time.tm_year + 1900), static_cast<unsigned>(time.tm_hour),
+                       static_cast<unsigned>(time.tm_min),         static_cast<unsigned>(time.tm_sec) };
+#endif
 
         // Same layout as 1.4.0: "05 Mar 1999   14:03:22".
         std::wstring result;

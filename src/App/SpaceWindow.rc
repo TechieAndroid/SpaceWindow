@@ -9,8 +9,8 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 IDI_SPACEWINDOW ICON "Assets\\SpaceWindow.ico"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION 1,1,0,0
+ PRODUCTVERSION 1,1,0,0
  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -27,12 +27,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "recompiler"
             VALUE "FileDescription", "SpaceWindow - see where your disk space goes"
-            VALUE "FileVersion", "1.0.0.0"
+            VALUE "FileVersion", "1.1.0.0"
             VALUE "InternalName", "SpaceWindow"
             VALUE "LegalCopyright", "Copyright © 2026 recompiler; SpaceMonger © 1998-2020 Sean Werkema. MIT License."
             VALUE "OriginalFilename", "SpaceWindow.exe"
             VALUE "ProductName", "SpaceWindow"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "ProductVersion", "1.1.0.0"
         END
     END
     BLOCK "VarFileInfo"

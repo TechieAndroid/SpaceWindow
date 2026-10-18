@@ -10,6 +10,9 @@
 #include "ChangeJournal.h"
 #include "Fields.h"
 #include "Parallel.h"
+#ifndef _WIN32
+#include "Posix.h"
+#endif
 
 namespace sm::ntfs
 {
@@ -87,13 +90,13 @@ namespace sm::ntfs
 
         bool NameIs(std::span<std::byte const> name, std::wstring_view expected) noexcept
         {
-            if (name.size() != expected.size() * sizeof(wchar_t))
+            if (name.size() != expected.size() * sizeof(std::uint16_t))  // UTF-16 on the disk
             {
                 return false;
             }
             for (std::size_t i = 0; i < expected.size(); ++i)
             {
-                if (At<std::uint16_t>(name, i * 2) != expected[i])
+                if (std::cmp_not_equal(At<std::uint16_t>(name, i * 2), static_cast<std::uint32_t>(expected[i])))
                 {
                     return false;
                 }
@@ -189,6 +192,7 @@ namespace sm::ntfs
             }
         }
 
+#ifdef _WIN32
         // Page-aligned memory: direct reads from a volume need aligned buffers.
         class AlignedBuffer
         {
@@ -222,6 +226,7 @@ namespace sm::ntfs
             GetSystemTimeAsFileTime(&now);
             return (std::uint64_t{ now.dwHighDateTime } << 32) | now.dwLowDateTime;
         }
+#endif
     }
 
     void FileRecord::Clear() noexcept
@@ -447,11 +452,22 @@ namespace sm::ntfs
                 FileName name;
                 name.parent = RecordOf(At<std::uint64_t>(value, kNameParent));
                 name.offset = static_cast<std::uint32_t>(out.nameText.size());
+#ifdef _WIN32
                 name.length = static_cast<std::uint16_t>(characters);
                 // The whole name at once: its length was checked against the value above.
                 static_assert(sizeof(wchar_t) == sizeof(std::uint16_t));
                 out.nameText.resize(out.nameText.size() + characters);
                 std::memcpy(out.nameText.data() + name.offset, value.data() + kNameText, characters * sizeof(wchar_t));
+#else
+                {
+                    // UTF-16 on the disk; wide strings hold whole code points here.
+                    std::u16string units(characters, u'\0');
+                    std::memcpy(units.data(), value.data() + kNameText, characters * sizeof(char16_t));
+                    std::wstring const text = posix::FromUtf16(units);
+                    name.length = static_cast<std::uint16_t>(text.size());
+                    out.nameText.append(text);
+                }
+#endif
                 out.names.push_back(name);
                 break;
             }
@@ -494,6 +510,7 @@ namespace sm::ntfs
         return wellFormed;
     }
 
+#ifdef _WIN32
     std::optional<Volume> Volume::Open(std::wstring const& root)
     {
         wchar_t name[64]{};
@@ -951,6 +968,7 @@ namespace sm::ntfs
         // Its names and sizes, or the file cannot be shown.
         return !out.names.empty() && (out.directory || out.hasData);
     }
+#endif
 
     TreeBuilder::TreeBuilder(std::uint64_t recordCount, ScanProgress* progress)
         : progress_(progress), folders_(static_cast<std::size_t>(recordCount))
@@ -1319,6 +1337,7 @@ namespace sm::ntfs
         return root;
     }
 
+#ifdef _WIN32
     std::optional<ScanResult> ScanVolume(std::wstring const& root, VolumeInfo volume, ScanProgress& progress,
                                          std::stop_token const& stop, bool addSpecialEntries)
     {
@@ -1431,4 +1450,5 @@ namespace sm::ntfs
         }
         return ScanResult{ ScanStatus::Completed, std::move(tree) };
     }
+#endif
 }
