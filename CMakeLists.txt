@@ -88,7 +88,7 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS qt6-qpa-plugins)  # Qt's X11 plugin, which no l
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS qt6-wayland)   # and its Wayland one
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)  # 1.fc44: the release it is for
-set(CPACK_RPM_PACKAGE_LICENSE MIT)
+set(CPACK_RPM_PACKAGE_LICENSE GPL-2.0-or-later)
 set(CPACK_RPM_PACKAGE_GROUP Applications/System)
 set(CPACK_RPM_PACKAGE_REQUIRES hicolor-icon-theme)
 set(CPACK_RPM_PACKAGE_RECOMMENDS qt6-qtwayland)

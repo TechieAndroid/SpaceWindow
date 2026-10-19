@@ -141,7 +141,7 @@ namespace sm
         std::array<std::wstring_view, 12> monthNames;
         std::array<std::wstring_view, 11> attributeNames;
         std::array<std::wstring_view, 3> themeNames;
-        std::array<std::wstring_view, 6> backdropNames;  // by sm::Backdrop
+        std::array<std::wstring_view, 8> backdropNames;  // by sm::Backdrop
 
         // Drive selection, scanning and deletion.
         std::wstring_view selectDrive;

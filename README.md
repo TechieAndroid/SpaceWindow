@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg" alt="License: GPL-2.0-or-later"></a>
   <img src="https://img.shields.io/badge/Windows-11-0078D4.svg" alt="Windows 11">
   <img src="https://img.shields.io/badge/C%2B%2B-20-00599C.svg" alt="C++20">
   <a href="https://ko-fi.com/recompiler"><img src="https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B.svg?logo=ko-fi&amp;logoColor=white" alt="Support on Ko-fi"></a>
@@ -245,6 +245,8 @@ An animation shows as soon as you pick it, and **Cancel** goes back.
 | Colour Mix | ly's slowly swirling bands of red, blue and black |
 | Game of Life | Conway's Game of Life, with new life sprinkled in now and then (as ly does) so that it never settles |
 | Y2K Tunnel | An endless, curving neon tube, flown through like a year-2000 screen saver |
+| Mandelbrot Set | An endless flight into the Mandelbrot set, steered as [XaoS](https://github.com/xaos-project/XaoS)'s autopilot steers it: towards the set's edge, wandering, until the numbers run out of precision (about 10^13 times closer), then from the start again, in a new palette |
+| Julia Set | The same, into one of a dozen Julia sets |
 
 | | |
 |---|---|
@@ -374,8 +376,8 @@ which makes them complete examples.
 - **Pie chart view** of the same map ([details](#pie-chart-view)), and an
   [inverted one](#inverted-pie-chart) whose rings travel inward.
 - **Background animations** around the pie charts: DOOM fire, Matrix rain,
-  ly's colour mix, Game of Life and an endless Y2K tunnel
-  ([details](#background-animations)).
+  ly's colour mix, Game of Life, an endless Y2K tunnel, and XaoS's flights
+  into the Mandelbrot and Julia sets ([details](#background-animations)).
 - **Themes** for the whole app, map included: the Windows look, Dracula,
   Alucard, or your own theme files, previewed live ([details](#themes)).
 - **Windows 11 design:** Mica backdrop, content in the title bar, a command
@@ -614,7 +616,7 @@ Where the speed comes from:
 | (new) | `src/Core/FolderWatch.*`: which folders changed since a scan, for reloads; `src/Core/IoCancellation.*`: stopping a scan blocked on a network share |
 | (new) | `src/Core/Theme.*`: themes and theme files; `src/App/ChromeTheme.*`: theme colours for the WinUI controls |
 | (new) | `src/Core/ViewHistory.*`: Back, Forward and the way back down (Alt+arrows) |
-| (new) | `src/Core/Backdrop.*`, `src/App/MapRendererBackdrop.cpp`: the background animations |
+| (new) | `src/Core/Backdrop.*`, `src/App/MapRendererBackdrop.cpp`: the background animations; `src/Core/Fractal.*`: the Mandelbrot and Julia flights, ported from XaoS |
 | (new) | `src/Core/Commands.*`: the commands and the keys that run them - one table for the window's shortcuts, the map's keys, the toolbar and Setup's list |
 | (new) | `src/Core/LabelFit.*`: the rules for fitting names into boxes and slices (the renderer measures and draws) |
 | (new) | `src/Core/Parallel.*`: decoding the master file table and building its tree on several processors |
@@ -821,10 +823,12 @@ docs/screenshots/                 the pictures in this README
 
 ## Forking and contributing
 
-SpaceWindow is free and open source under the MIT License, like SpaceMonger:
-you may use it, copy it, change it, fork it, ship your own version or even
-sell it, for any purpose. The only condition is to keep the copyright and
-license notice ([LICENSE.txt](LICENSE.txt)) with your copies.
+SpaceWindow is free software under the GNU General Public License, version 2
+or (at your option) any later version ([LICENSE.txt](LICENSE.txt)): you may
+use it for any purpose, copy it, change it, fork it and share or sell your
+version, as long as you pass on the same freedoms - your version under the
+same license, with its source code - and keep the notices
+([THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
 Bug reports, ideas and pull requests are welcome. Before sending a pull
 request, please run `.\build.ps1 -All` (it builds, tests and runs the
@@ -844,9 +848,11 @@ on Ko-fi:
 
 ## License
 
-[MIT](LICENSE.txt). SpaceMonger is Copyright © 1998–2020 Sean Werkema;
-SpaceWindow is Copyright © 2026 recompiler. The colours of the Dracula and
-Alucard themes are from the Dracula Theme, Copyright © 2023 Dracula Theme,
-also under the MIT License ([THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
+[GNU General Public License, version 2 or later](LICENSE.txt). SpaceWindow
+is Copyright © 2026 recompiler. It contains SpaceMonger 1.4.0, Copyright ©
+1998–2020 Sean Werkema, and the colours of the Dracula and Alucard themes,
+Copyright © 2023 Dracula Theme, both under the MIT License; and a port of
+XaoS, Copyright © 1996–1997 Jan Hubicka and Thomas Marsh and the XaoS
+developers, under the GPL ([THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
 ![About SpaceWindow](docs/screenshots/about.png)

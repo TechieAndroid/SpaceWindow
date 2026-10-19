@@ -22,6 +22,7 @@
 #pragma once
 
 #include "../Core/Backdrop.h"
+#include "../Core/Fractal.h"
 #include "../Core/LabelFit.h"
 #include "../Core/Palette.h"
 #include "../Core/PieLayout.h"
@@ -224,12 +225,13 @@ namespace sm::ui
             sm::FireField fire;
             sm::MatrixRain rain;
             sm::LifeField life;
-            float phaseA = 0.0f;  // the colour mix's pattern
+            sm::FractalZoom fractal;  // the Mandelbrot and Julia flights
+            float phaseA = 0.0f;      // the colour mix's pattern
             float phaseB = 0.0f;
-            int columns = 0;  // of the grid animations (fire, colour mix, life), in cells
+            int columns = 0;  // of the grid animations (fire, colour mix, life, fractals), in cells
             int rows = 0;
             int cell = 1;        // pixels
-            bool smooth = true;  // stretched smoothly (fire, colour mix) or as squares (life)
+            bool smooth = true;  // stretched smoothly (fire, colour mix, fractals) or as squares (life)
             std::vector<std::uint32_t> pixels;
             std::vector<sm::TunnelRing> rings;
             winrt::com_ptr<ID2D1Bitmap1> grid;    // the grid animations, a pixel a cell

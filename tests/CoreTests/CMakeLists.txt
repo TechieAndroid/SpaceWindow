@@ -8,6 +8,7 @@ add_executable(CoreTests
   BenchPosix.cpp
   CommandTests.cpp
   FormatTests.cpp
+  FractalTests.cpp
   LabelFitTests.cpp
   LayoutTests.cpp
   NtfsTests.cpp

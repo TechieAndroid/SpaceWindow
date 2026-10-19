@@ -75,6 +75,7 @@
     </ClCompile>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="BackdropTests.cpp" />
+    <ClCompile Include="FractalTests.cpp" />
     <ClCompile Include="Bench.cpp" />
     <ClCompile Include="CommandTests.cpp" />
     <ClCompile Include="Compare.cpp" />

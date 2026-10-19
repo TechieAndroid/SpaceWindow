@@ -10,6 +10,7 @@
 //    "entropy"), so that it never settles.
 //  * Tunnel: an endless, curving neon tube flown through, in the style of a
 //    year-2000 screen saver.
+//  * Mandelbrot and Julia: flights into the sets, ported from XaoS (Fractal.h).
 #pragma once
 
 #include <cstdint>

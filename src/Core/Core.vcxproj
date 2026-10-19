@@ -61,6 +61,7 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="FolderTree.h" />
     <ClInclude Include="Backdrop.h" />
+    <ClInclude Include="Fractal.h" />
     <ClInclude Include="ChangeJournal.h" />
     <ClInclude Include="Commands.h" />
     <ClInclude Include="Fields.h" />
@@ -87,6 +88,7 @@
     </ClCompile>
     <ClCompile Include="FolderTree.cpp" />
     <ClCompile Include="Backdrop.cpp" />
+    <ClCompile Include="Fractal.cpp" />
     <ClCompile Include="ChangeJournal.cpp" />
     <ClCompile Include="Commands.cpp" />
     <ClCompile Include="Format.cpp" />

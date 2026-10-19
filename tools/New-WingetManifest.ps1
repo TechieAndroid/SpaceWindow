@@ -95,7 +95,7 @@ PublisherSupportUrl: $Repository/issues
 Author: $publisher
 PackageName: SpaceWindow
 PackageUrl: $Repository
-License: MIT
+License: GPL-2.0-or-later
 LicenseUrl: $Repository/blob/$Branch/LICENSE.txt
 Copyright: Copyright (c) 2026 recompiler; SpaceMonger (c) 1998-2020 Sean Werkema
 ShortDescription: See where your disk space goes - a modern Windows 11 remake of the classic SpaceMonger.

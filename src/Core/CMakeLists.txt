@@ -5,6 +5,7 @@ add_library(SpaceWindowCore STATIC
   Commands.cpp
   FolderTree.cpp
   Format.cpp
+  Fractal.cpp            # ported from XaoS (GPL-2.0-or-later)
   LabelFit.cpp
   Lang.cpp
   MapItem.cpp

@@ -20,6 +20,7 @@
 #include <QPainterPath>
 
 #include "Backdrop.h"
+#include "Fractal.h"
 #include "LabelFit.h"
 #include "MapView.h"
 #include "Palette.h"
@@ -168,6 +169,7 @@ namespace sm::qt
             // Fire, colour mix and Life: a pixel per cell, stretched over the panel.
             FireField fire;
             LifeField life;
+            FractalZoom fractal;                // the Mandelbrot and Julia flights
             std::vector<std::uint32_t> pixels;  // premultiplied 0xAARRGGBB
             QImage grid;                        // over `pixels`, not a copy
             int columns = 0;

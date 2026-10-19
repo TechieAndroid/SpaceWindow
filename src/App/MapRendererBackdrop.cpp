@@ -136,6 +136,11 @@ namespace sm::ui
         case sm::Backdrop::Life:
             PrepareGrid(std::max(3, static_cast<int>(std::lround(7.0f * scale_))), kLifeRate, scene.time, false);
             break;
+        case sm::Backdrop::Mandelbrot:
+        case sm::Backdrop::Julia:
+            PrepareGrid(std::max(1, static_cast<int>(std::lround(2.0f * scale_))), sm::FractalZoom::kStepsPerSecond,
+                        scene.time, true);
+            break;
         case sm::Backdrop::Matrix: PrepareRain(scene.time); break;
         case sm::Backdrop::Tunnel:
             sm::TunnelRings(scene.time, static_cast<float>(width_), static_cast<float>(height_), b.rings);
@@ -164,6 +169,15 @@ namespace sm::ui
             {
                 b.life.Resize(columns, rows, b.random);
             }
+            else if (b.kind == sm::Backdrop::Mandelbrot || b.kind == sm::Backdrop::Julia)
+            {
+                if (b.fractal.Flights() == 0)
+                {
+                    b.fractal.Start(b.kind == sm::Backdrop::Julia ? sm::FractalSet::Julia : sm::FractalSet::Mandelbrot,
+                                    b.random);
+                }
+                b.fractal.Resize(columns, rows);
+            }
             b.pixels.assign(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows), 0);
             b.grid = nullptr;
             stepped = true;
@@ -182,6 +196,10 @@ namespace sm::ui
             {
                 b.life.Step(b.random);
             }
+            else if (b.kind == sm::Backdrop::Mandelbrot || b.kind == sm::Backdrop::Julia)
+            {
+                b.fractal.Step(b.random);
+            }
             b.next += 1.0 / rate;
             stepped = true;
         }
@@ -190,23 +208,30 @@ namespace sm::ui
             return;
         }
 
-        std::uint32_t* pixel = b.pixels.data();
-        for (int y = 0; y < rows; ++y)
+        if (b.kind == sm::Backdrop::Mandelbrot || b.kind == sm::Backdrop::Julia)
         {
-            for (int x = 0; x < columns; ++x, ++pixel)
+            b.fractal.Paint(b.pixels, time);
+        }
+        else
+        {
+            std::uint32_t* pixel = b.pixels.data();
+            for (int y = 0; y < rows; ++y)
             {
-                switch (b.kind)
+                for (int x = 0; x < columns; ++x, ++pixel)
                 {
-                case sm::Backdrop::Fire: *pixel = sm::FireColor(b.fire.At(x, y)); break;
-                case sm::Backdrop::Life: *pixel = LifeColor(b.life.Age(x, y)); break;
-                default:
-                {
-                    // The pattern's units: -1 .. 1 down the height, square cells.
-                    float const u = static_cast<float>(2 * x + 1 - columns) / static_cast<float>(rows);
-                    float const v = static_cast<float>(2 * y + 1 - rows) / static_cast<float>(rows);
-                    *pixel = kMixBands[sm::ColorMixBand(u, v, static_cast<float>(time), b.phaseA, b.phaseB)];
-                    break;
-                }
+                    switch (b.kind)
+                    {
+                    case sm::Backdrop::Fire: *pixel = sm::FireColor(b.fire.At(x, y)); break;
+                    case sm::Backdrop::Life: *pixel = LifeColor(b.life.Age(x, y)); break;
+                    default:
+                    {
+                        // The pattern's units: -1 .. 1 down the height, square cells.
+                        float const u = static_cast<float>(2 * x + 1 - columns) / static_cast<float>(rows);
+                        float const v = static_cast<float>(2 * y + 1 - rows) / static_cast<float>(rows);
+                        *pixel = kMixBands[sm::ColorMixBand(u, v, static_cast<float>(time), b.phaseA, b.phaseB)];
+                        break;
+                    }
+                    }
                 }
             }
         }
@@ -342,6 +367,8 @@ namespace sm::ui
         case sm::Backdrop::Fire:
         case sm::Backdrop::ColorMix:
         case sm::Backdrop::Life:
+        case sm::Backdrop::Mandelbrot:
+        case sm::Backdrop::Julia:
             if (b.grid)
             {
                 auto const right = static_cast<float>(b.columns * b.cell);

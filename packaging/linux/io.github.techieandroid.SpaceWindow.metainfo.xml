@@ -4,7 +4,7 @@
 <component type="desktop-application">
   <id>io.github.techieandroid.SpaceWindow</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
+  <project_license>GPL-2.0-or-later</project_license>
 
   <name>SpaceWindow</name>
   <summary>See where your disk space goes</summary>
@@ -67,6 +67,7 @@
     <release version="1.1.0" date="2026-10-18">
       <description>
         <p>SpaceWindow runs on Linux, with everything the Windows version has: the treemap and pie charts, the background animations, themes, reloads of only what changed, and the trash.</p>
+        <p>Two new background animations, ported from XaoS: endless flights into the Mandelbrot set and into Julia sets. With them, SpaceWindow is now under the GNU General Public License, version 2 or later.</p>
       </description>
     </release>
     <release version="1.0.0" date="2026-10-16">

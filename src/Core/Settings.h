@@ -36,13 +36,15 @@ namespace sm
     enum class Backdrop : int
     {
         None = 0,
-        Fire = 1,      // the PSX DOOM fire, as in kiedtl/fire and ly
-        Matrix = 2,    // falling characters, as in CMatrix and ly
-        ColorMix = 3,  // ly's colour-mixing pattern
-        Life = 4,      // Conway's Game of Life, as in ly
-        Tunnel = 5,    // an endless, curving neon tube
+        Fire = 1,        // the PSX DOOM fire, as in kiedtl/fire and ly
+        Matrix = 2,      // falling characters, as in CMatrix and ly
+        ColorMix = 3,    // ly's colour-mixing pattern
+        Life = 4,        // Conway's Game of Life, as in ly
+        Tunnel = 5,      // an endless, curving neon tube
+        Mandelbrot = 6,  // a flight into the Mandelbrot set, as XaoS's autopilot flies it (Fractal.h)
+        Julia = 7,       // ... into a Julia set
     };
-    inline constexpr int kBackdropCount = 6;
+    inline constexpr int kBackdropCount = 8;
 
     struct WindowPlacement
     {

@@ -61,8 +61,9 @@ shared presenter:
   pixels, and Qt rounds each on its own - so no row is cut off or left
   stale, and the overlay lines up with it. Rollover boxes, name tips, info
   tips with the file's icon from the desktop's icon theme.
-- The five background animations (DOOM fire, Matrix, colour mix, Game of
-  Life, Y2K Tunnel) around the pie charts and behind the welcome screen, at
+- The seven background animations (DOOM fire, Matrix, colour mix, Game of
+  Life, Y2K Tunnel, and the Mandelbrot and Julia flights ported from XaoS,
+  `src/Core/Fractal.*`) around the pie charts and behind the welcome screen, at
   their own pace up to 60 frames a second. They hold still on their last
   frame once the window has been in the background for a minute (counted
   from its launch if it never got the keyboard) and while

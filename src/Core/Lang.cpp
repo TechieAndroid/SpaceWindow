@@ -28,7 +28,7 @@ namespace sm
             .locale = L"en-US",
 
             .aboutApp = L"About SpaceWindow",
-            .freeware = L"SpaceWindow is free software, released under the MIT License.",
+            .freeware = L"SpaceWindow is free software, released under the GNU General Public License.",
             .warranty = L"You may distribute this program freely.  Because this program is free, the author "
                         L"cannot and will not assume responsibility for this program's behavior.  There are no "
                         L"warranties of any kind, expressed or implied, on this product.",
@@ -108,7 +108,8 @@ namespace sm
             .attributeNames = { L"Archive", L"Compressed", L"Folder", L"Encrypted", L"Hidden", L"Offline",
                                 L"Read-only", L"Reparse point", L"Sparse", L"System", L"Temporary" },
             .themeNames = { L"Use system setting", L"Light", L"Dark" },
-            .backdropNames = { L"None", L"DOOM Fire", L"Matrix", L"Color Mix", L"Game of Life", L"Y2K Tunnel" },
+            .backdropNames = { L"None", L"DOOM Fire", L"Matrix", L"Color Mix", L"Game of Life", L"Y2K Tunnel",
+                               L"Mandelbrot Set", L"Julia Set" },
 
             .selectDrive = L"Select a Drive or Folder",
             .browseFolder = L"Browse for a folder…",
@@ -190,7 +191,8 @@ namespace sm
                                 L"Orange", L"Yellow", L"Green", L"Aqua", L"Blue", L"Violet" };
             // clang-format on
             lang.displayColors = L"Display Colours";
-            lang.backdropNames = { L"None", L"DOOM Fire", L"Matrix", L"Colour Mix", L"Game of Life", L"Y2K Tunnel" };
+            lang.backdropNames = { L"None",         L"DOOM Fire",  L"Matrix",         L"Colour Mix",
+                                   L"Game of Life", L"Y2K Tunnel", L"Mandelbrot Set", L"Julia Set" };
             lang.warranty = L"You may distribute this program freely.  Because this program is free, the author "
                             L"cannot and will not assume responsibility for this program's behaviour.  There are "
                             L"no warranties of any kind, expressed or implied, on this product.";
@@ -205,7 +207,7 @@ namespace sm
             .locale = L"fr-FR",
 
             .aboutApp = L"À propos de SpaceWindow",
-            .freeware = L"SpaceWindow est un logiciel libre distribué sous licence MIT.",
+            .freeware = L"SpaceWindow est un logiciel libre distribué sous la licence publique générale GNU.",
             .warranty = L"Vous pouvez distribuer ce programme librement.  Ce programme étant gratuit, l'auteur "
                         L"ne peut et ne veut assumer aucune responsabilité quant à son comportement.  Ce produit "
                         L"n'est assorti d'aucune garantie, expresse ou implicite.",
@@ -286,7 +288,7 @@ namespace sm
                                 L"Lecture seule", L"Point d'analyse", L"Éparse", L"Système", L"Temporaire" },
             .themeNames = { L"Utiliser le paramètre système", L"Clair", L"Sombre" },
             .backdropNames = { L"Aucune", L"Feu de DOOM", L"Matrice", L"Mélange de couleurs", L"Jeu de la vie",
-                               L"Tunnel Y2K" },
+                               L"Tunnel Y2K", L"Ensemble de Mandelbrot", L"Ensemble de Julia" },
 
             .selectDrive = L"Sélectionner un lecteur ou un dossier",
             .browseFolder = L"Parcourir les dossiers…",

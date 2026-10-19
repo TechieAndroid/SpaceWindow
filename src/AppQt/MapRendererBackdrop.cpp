@@ -6,9 +6,9 @@
 // gaps between its slices, and behind the welcome screen.  Before each frame
 // an animation steps at its own pace and draws what it can off-screen; the
 // frame then shows it under the cached map.
-//  * Fire, colour mix and Life are grids of cells, a pixel each in a small
-//    image stretched over the panel: smoothly for the fire and the colour
-//    mix, as crisp squares for Life.
+//  * Fire, colour mix, Life and the fractals are grids of cells, a pixel each
+//    in a small image stretched over the panel: smoothly for the fire, the
+//    colour mix and the fractals, as crisp squares for Life.
 //  * The falling characters come from sheets of glyphs drawn once, stamped
 //    into a layer whenever the rain moves.
 //  * The tunnel is drawn afresh every frame: neon rings with a soft glow, and
@@ -154,6 +154,8 @@ namespace sm::qt
         case Backdrop::Fire: PrepareGrid(scaled(4.0f, 2), kFireRate, scene.time, true); break;
         case Backdrop::ColorMix: PrepareGrid(scaled(9.0f, 4), kMixRate, scene.time, true); break;
         case Backdrop::Life: PrepareGrid(scaled(7.0f, 3), kLifeRate, scene.time, false); break;
+        case Backdrop::Mandelbrot:
+        case Backdrop::Julia: PrepareGrid(scaled(2.0f, 1), FractalZoom::kStepsPerSecond, scene.time, true); break;
         case Backdrop::Matrix: PrepareRain(scene.time); break;
         case Backdrop::Tunnel:
             TunnelRings(scene.time, static_cast<float>(b.width), static_cast<float>(b.height), b.rings);
@@ -183,6 +185,14 @@ namespace sm::qt
             {
                 b.life.Resize(columns, rows, b.random);
             }
+            else if (b.kind == Backdrop::Mandelbrot || b.kind == Backdrop::Julia)
+            {
+                if (b.fractal.Flights() == 0)
+                {
+                    b.fractal.Start(b.kind == Backdrop::Julia ? FractalSet::Julia : FractalSet::Mandelbrot, b.random);
+                }
+                b.fractal.Resize(columns, rows);
+            }
             b.pixels.assign(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows), 0);
             b.grid = QImage(reinterpret_cast<uchar*>(b.pixels.data()), columns, rows,
                             static_cast<qsizetype>(columns) * 4, QImage::Format_ARGB32_Premultiplied);
@@ -202,11 +212,20 @@ namespace sm::qt
             {
                 b.life.Step(b.random);
             }
+            else if (b.kind == Backdrop::Mandelbrot || b.kind == Backdrop::Julia)
+            {
+                b.fractal.Step(b.random);
+            }
             b.next += 1.0 / rate;
             stepped = true;
         }
         if (!stepped)
         {
+            return;
+        }
+        if (b.kind == Backdrop::Mandelbrot || b.kind == Backdrop::Julia)
+        {
+            b.fractal.Paint(b.pixels, time);
             return;
         }
 
@@ -329,6 +348,8 @@ namespace sm::qt
         case Backdrop::Fire:
         case Backdrop::ColorMix:
         case Backdrop::Life:
+        case Backdrop::Mandelbrot:
+        case Backdrop::Julia:
             if (!b.grid.isNull())
             {
                 painter.setRenderHint(QPainter::SmoothPixmapTransform, b.smooth);
