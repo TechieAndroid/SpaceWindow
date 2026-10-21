@@ -94,7 +94,19 @@ namespace winrt::SpaceWindow::implementation
             }
         });
         auto const appWindow = AppWindow();
-        appWindow.TitleBar().PreferredHeightOption(muw::TitleBarHeightOption::Tall);
+        // The tall title bar is Windows 11's: on Windows 10 the XAML window
+        // draws a title bar of its own and the AppWindow's is not extended
+        // into, so PreferredHeightOption would throw (and the app fail fast).
+        try
+        {
+            if (muw::AppWindowTitleBar::IsCustomizationSupported() && appWindow.TitleBar().ExtendsContentIntoTitleBar())
+            {
+                appWindow.TitleBar().PreferredHeightOption(muw::TitleBarHeightOption::Tall);
+            }
+        }
+        catch (winrt::hresult_error const&)  // NOLINT(bugprone-empty-catch): the standard height then
+        {
+        }
         if (HICON const icon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_SPACEWINDOW)))
         {
             appWindow.SetIcon(Microsoft::UI::GetIconIdFromIcon(icon));
@@ -421,6 +433,10 @@ namespace winrt::SpaceWindow::implementation
     void MainWindow::UpdateCaptionButtons()
     {
         // As in the WinUI Gallery: the caption buttons do not follow a theme change by themselves.
+        if (!muw::AppWindowTitleBar::IsCustomizationSupported())
+        {
+            return;  // Windows 10 draws its own
+        }
         auto const titleBar = AppWindow().TitleBar();
         Windows::UI::Color const clear{ 0, 0, 0, 0 };
         titleBar.ButtonBackgroundColor(clear);

@@ -1255,9 +1255,9 @@ namespace sm
                 }
                 distdown = next == width_ ? kFar : next - x;
             }
-            bool const near = distdown < INT_MAX / 4 && distup < INT_MAX / 4;
+            bool const nearby = distdown < INT_MAX / 4 && distup < INT_MAX / 4;
             std::uint32_t const c = down[x];
-            if (near && up[x] == c && c == current[x - distup] && c == up[x - distup] && c == up[x + distdown] &&
+            if (nearby && up[x] == c && c == current[x - distup] && c == up[x - distup] && c == up[x + distdown] &&
                 c == down[x + distdown] && c == down[x - distup])
             {
                 current[x] = c;
@@ -1265,8 +1265,9 @@ namespace sm
             else
             {
                 // All of them outside the set: no cycle to look for.
-                bool const outside = near && up[x] != 0 && c != 0 && current[x - distup] != 0 && up[x - distup] != 0 &&
-                                     up[x + distdown] != 0 && down[x - distup] != 0 && down[x + distdown] != 0;
+                bool const outside = nearby && up[x] != 0 && c != 0 && current[x - distup] != 0 &&
+                                     up[x - distup] != 0 && up[x + distdown] != 0 && down[x - distup] != 0 &&
+                                     down[x + distdown] != 0;
                 current[x] = Point(columnAt(x), y, !outside);
             }
             distup = 0;
@@ -1326,16 +1327,16 @@ namespace sm
                 }
                 distdown = next == height_ ? kFar : next - y;
             }
-            bool const near = distdown < INT_MAX / 4 && distup < INT_MAX / 4;
+            bool const nearby = distdown < INT_MAX / 4 && distup < INT_MAX / 4;
             std::uint32_t const c = value(rxr, y);
-            if (near && value(rxl, y) == c && value(rxl, y - distup) == c && value(rxr, y - distup) == c &&
+            if (nearby && value(rxl, y) == c && value(rxl, y - distup) == c && value(rxr, y - distup) == c &&
                 value(rx, y - distup) == c && value(rxr, y + distdown) == c && value(rxl, y + distdown) == c)
             {
                 At(values_, rx, y) = c;
             }
             else
             {
-                bool const outside = near && value(rxl, y) != 0 && c != 0 && value(rxr, y + distdown) != 0 &&
+                bool const outside = nearby && value(rxl, y) != 0 && c != 0 && value(rxr, y + distdown) != 0 &&
                                      value(rxl, y + distdown) != 0 && value(rxl, y - distup) != 0 &&
                                      value(rx, y - distup) != 0 && value(rxr, y - distup) != 0;
                 At(values_, rx, y) = Point(x, rowAt(y), !outside);

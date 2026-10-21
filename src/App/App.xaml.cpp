@@ -8,6 +8,8 @@
 #include "MainWindow.xaml.h"
 #include "../Core/FolderTree.h"
 
+#include <format>
+
 namespace winrt::SpaceWindow::implementation
 {
     App::App()
@@ -25,25 +27,40 @@ namespace winrt::SpaceWindow::implementation
 
     void App::OnLaunched([[maybe_unused]] Microsoft::UI::Xaml::LaunchActivatedEventArgs const& args)
     {
-        // When the user runs SpaceWindow elevated, let the scanner list every
-        // folder (a no-op otherwise).
-        sm::TryEnableBackupPrivilege();
+        auto const launch = [this] {
+            // When the user runs SpaceWindow elevated, let the scanner list every
+            // folder (a no-op otherwise).
+            sm::TryEnableBackupPrivilege();
 
-        // "SpaceWindow.exe <path>" opens and scans a drive or folder, so the app
-        // can be used from "Open with" and the command line.
-        std::wstring initialPath;
-        int argc = 0;
-        wil::unique_hlocal_ptr<PWSTR[]> const argv(CommandLineToArgvW(GetCommandLineW(), &argc));
-        if (argv && argc > 1)
+            // "SpaceWindow.exe <path>" opens and scans a drive or folder, so the app
+            // can be used from "Open with" and the command line.
+            std::wstring initialPath;
+            int argc = 0;
+            wil::unique_hlocal_ptr<PWSTR[]> const argv(CommandLineToArgvW(GetCommandLineW(), &argc));
+            if (argv && argc > 1)
+            {
+                initialPath = argv[1];
+            }
+
+            window_ = make<MainWindow>();
+            window_.Activate();
+            if (!initialPath.empty())
+            {
+                get_self<implementation::MainWindow>(window_)->StartScan(std::move(initialPath));
+            }
+        };
+        try
         {
-            initialPath = argv[1];
+            launch();
         }
-
-        window_ = make<MainWindow>();
-        window_.Activate();
-        if (!initialPath.empty())
+        catch (hresult_error const& error)
         {
-            get_self<implementation::MainWindow>(window_)->StartScan(std::move(initialPath));
+            // Rather than the silent fail-fast an exception here ends in, say
+            // what went wrong (a Windows the Windows App SDK cannot run on, say).
+            std::wstring text = L"SpaceWindow could not start.\n\n";
+            text.append(error.message()).append(std::format(L"\n(0x{:08X})", static_cast<std::uint32_t>(error.code())));
+            MessageBoxW(nullptr, text.c_str(), L"SpaceWindow", MB_OK | MB_ICONERROR);
+            Exit();
         }
     }
 }

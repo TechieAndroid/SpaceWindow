@@ -49,6 +49,30 @@ namespace test
 }
 
 #ifdef _WIN32
+namespace
+{
+    // Started as administrator from an MSYS2 shell (Git Bash), a program
+    // inherits the backup and restore privileges enabled, and could then list
+    // the folders the tests lock: the tests run as an ordinary program does.
+    void DropBackupPrivileges() noexcept
+    {
+        wil::unique_handle token;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, token.put()))
+        {
+            return;
+        }
+        for (wchar_t const* const name : { L"SeBackupPrivilege", L"SeRestorePrivilege" })
+        {
+            TOKEN_PRIVILEGES privileges{};  // Attributes 0: disabled
+            privileges.PrivilegeCount = 1;
+            if (LookupPrivilegeValueW(nullptr, name, &privileges.Privileges[0].Luid))
+            {
+                (void)AdjustTokenPrivileges(token.get(), FALSE, &privileges, 0, nullptr, nullptr);
+            }
+        }
+    }
+}
+
 int wmain(int argc, wchar_t** argv)
 {
     SetConsoleOutputCP(CP_UTF8);
@@ -96,6 +120,9 @@ int main(int argc, char** narrow)
         }
         return RunBenchmark(argv[2], threadCounts);
     }
+#endif
+#ifdef _WIN32
+    DropBackupPrivileges();
 #endif
     int first = 1;
     bool volume = false;

@@ -38,9 +38,9 @@ TEST_CASE(FractalPointsInsideAndOutsideTheSet)
 
     // Outside, the smooth count grows towards the set and never jumps by more
     // than about an iteration between near points.
-    std::uint32_t const far = Mandelbrot(1.0, 1.0);
+    std::uint32_t const farther = Mandelbrot(1.0, 1.0);
     std::uint32_t const nearer = Mandelbrot(0.3, 0.6);
-    CHECK(far > 0u && nearer > far);
+    CHECK(farther > 0u && nearer > farther);
     std::uint32_t last = Mandelbrot(-2.5, 0.0);
     for (int i = 1; i <= 50; ++i)
     {

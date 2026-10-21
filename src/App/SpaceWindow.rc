@@ -29,7 +29,7 @@ BEGIN
             VALUE "FileDescription", "SpaceWindow - see where your disk space goes"
             VALUE "FileVersion", "1.1.0.0"
             VALUE "InternalName", "SpaceWindow"
-            VALUE "LegalCopyright", "Copyright © 2026 recompiler; SpaceMonger © 1998-2020 Sean Werkema. MIT License."
+            VALUE "LegalCopyright", "Copyright © 2026 recompiler; SpaceMonger © 1998-2020 Sean Werkema. GNU GPL v2 or later."
             VALUE "OriginalFilename", "SpaceWindow.exe"
             VALUE "ProductName", "SpaceWindow"
             VALUE "ProductVersion", "1.1.0.0"

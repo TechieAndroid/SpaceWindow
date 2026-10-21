@@ -252,6 +252,7 @@ An animation shows as soon as you pick it, and **Cancel** goes back.
 |---|---|
 | ![DOOM Fire](docs/screenshots/fire.jpg) | ![Matrix](docs/screenshots/matrix.jpg) |
 | ![Colour Mix](docs/screenshots/colormix.jpg) | ![Game of Life](docs/screenshots/life.jpg) |
+| ![Mandelbrot Set](docs/screenshots/mandelbrot.jpg) | ![Julia Set](docs/screenshots/julia.jpg) |
 
 The animations are off until you pick one. They pause while the window is
 minimized, hold still while battery saver is on and once the window has been
@@ -359,7 +360,7 @@ which makes them complete examples.
 
 | | SpaceMonger 1.4.0 | SpaceWindow |
 |---|---|---|
-| Runs on | Windows 95, 98, NT | Windows 11 (x64 and ARM64) |
+| Runs on | Windows 95, 98, NT | Windows 11 (x64 and ARM64) and Linux (x86_64 and aarch64) |
 | Language | C++ for Visual C++ 6, ANSI strings | C++20, Unicode throughout |
 | User interface | MFC and GDI | WinUI 3 (Windows App SDK 2.5) with Mica and Fluent design |
 | Drawing | 9-pixel bitmap fonts, stretched on high-DPI screens | Direct2D and DirectWrite at the screen's real resolution |
@@ -369,7 +370,7 @@ which makes them complete examples.
 | Paths | Up to 260 characters | Unicode, any length |
 | Sizes | Up to "4096.0 Gb", from file lengths | Up to PB, real space on disk |
 | Keyboard | Mouse only | Full keyboard navigation and shortcuts |
-| Tests | None | 98 unit tests, 4 drive tests and a UI smoke test, AddressSanitizer, static analysis, a formatting check |
+| Tests | None | 104 unit tests on Windows and 109 on Linux, 4 drive tests, a UI smoke test on each platform, AddressSanitizer, static analysis, a formatting check |
 
 ### New features
 
@@ -570,7 +571,7 @@ Where the speed comes from:
   as errors and SDL checks.
 - **Separation:** everything that doesn't need the user interface (scanner,
   layouts, settings, text, colours) is a library with unit tests.
-- **Checked:** 98 unit tests (formatting, languages, the keyboard shortcuts
+- **Checked:** 104 unit tests on Windows, 109 on Linux (formatting, languages, the keyboard shortcuts
   and the README's list of them, colours, themes and theme files, treemap and
   pie chart layouts (the pie inverted too), fitting names into boxes and
   slices, the background animations, Back, Forward and the way back down,
